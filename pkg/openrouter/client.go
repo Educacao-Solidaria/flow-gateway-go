@@ -26,7 +26,6 @@ type Client interface {
 type MockClient struct {
 	mu           sync.RWMutex
 	customReply  string
-	latency      time.Duration
 	failRequests bool
 	requestCount int
 }

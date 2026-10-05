@@ -2,6 +2,7 @@ package openrouter_test
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -78,7 +79,7 @@ func TestMockClient_ValidationErrors(t *testing.T) {
 
 	// Modelo vazio
 	_, err := client.CreateChatCompletion(context.Background(), &domain.ChatCompletionRequest{})
-	if err != openrouter.ErrEmptyModel {
+	if !errors.Is(err, openrouter.ErrEmptyModel) {
 		t.Fatalf("esperava ErrEmptyModel, obteve: %v", err)
 	}
 
@@ -86,7 +87,7 @@ func TestMockClient_ValidationErrors(t *testing.T) {
 	_, err = client.CreateChatCompletion(context.Background(), &domain.ChatCompletionRequest{
 		Model: domain.ModelDeepSeekR1,
 	})
-	if err != openrouter.ErrEmptyMessages {
+	if !errors.Is(err, openrouter.ErrEmptyMessages) {
 		t.Fatalf("esperava ErrEmptyMessages, obteve: %v", err)
 	}
 }
@@ -104,7 +105,7 @@ func TestMockClient_ContextCancellation(t *testing.T) {
 	}
 
 	_, err := client.CreateChatCompletion(ctx, req)
-	if err != context.Canceled {
+	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("esperava context.Canceled, obteve: %v", err)
 	}
 }

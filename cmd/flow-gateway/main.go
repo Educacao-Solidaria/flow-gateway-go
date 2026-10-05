@@ -49,5 +49,9 @@ func run(ctx context.Context, args []string, stdout io.Writer) error {
 		return err
 	}
 	log.Info("configuração carregada", "version", version.Version, "env", cfg.Env, "addr", cfg.Server.Addr)
-	return server.New(cfg.Server, log).Run(ctx)
+	srv, err := server.New(cfg.Server, log)
+	if err != nil {
+		return err
+	}
+	return srv.Run(ctx)
 }

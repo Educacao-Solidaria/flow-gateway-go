@@ -36,6 +36,10 @@ type ServerConfig struct {
 	// WriteTimeout 0 desliga o limite: streams SSE são longos por natureza.
 	WriteTimeout    time.Duration `mapstructure:"write_timeout"`
 	ShutdownTimeout time.Duration `mapstructure:"shutdown_timeout"`
+	// TrustedProxies lista IPs/CIDRs dos proxies cujos X-Forwarded-For,
+	// X-Real-IP e X-Request-Id são aceitos. Vazio: nenhum é aceito. No
+	// ambiente, separados por vírgula (FLOW_SERVER_TRUSTED_PROXIES).
+	TrustedProxies []string `mapstructure:"trusted_proxies"`
 }
 
 // LogConfig configura o logger estruturado.
@@ -56,6 +60,7 @@ var defaults = map[string]any{
 	"server.read_timeout":     15 * time.Second,
 	"server.write_timeout":    time.Duration(0),
 	"server.shutdown_timeout": 15 * time.Second,
+	"server.trusted_proxies":  []string{},
 	"log.level":               "info",
 	"log.format":              "json",
 	"openrouter.base_url":     "https://openrouter.ai/api/v1",

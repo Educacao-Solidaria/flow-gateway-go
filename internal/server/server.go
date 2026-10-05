@@ -1,5 +1,5 @@
 // Package server monta o servidor HTTP base do gateway: roteador chi,
-// middlewares de trace, log e recover, e encerramento gracioso.
+// middlewares de IP real, request id, log e recover, e encerramento gracioso.
 package server
 
 import (
@@ -12,14 +12,11 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/go-chi/chi/v5/middleware"
+	chimw "github.com/go-chi/chi/v5/middleware"
 
 	"github.com/Educacao-Solidaria/flow-gateway-go/internal/config"
-	"github.com/Educacao-Solidaria/flow-gateway-go/internal/logger"
+	"github.com/Educacao-Solidaria/flow-gateway-go/internal/middleware"
 )
-
-// TraceHeader devolve ao cliente o trace_id da requisição.
-const TraceHeader = "X-Trace-Id"
 
 // Server é o servidor HTTP do gateway.
 type Server struct {
@@ -41,10 +38,15 @@ func ShuttingDown(ctx context.Context) <-chan struct{} {
 	return ch
 }
 
-// New cria o servidor com as rotas base (/healthz).
-func New(cfg config.ServerConfig, log *slog.Logger) *Server {
+// New cria o servidor com as rotas base (/healthz). Falha se
+// cfg.TrustedProxies tiver entrada que não seja IP nem CIDR.
+func New(cfg config.ServerConfig, log *slog.Logger) (*Server, error) {
+	trusted, err := middleware.ParseTrustedProxies(cfg.TrustedProxies)
+	if err != nil {
+		return nil, err
+	}
 	r := chi.NewRouter()
-	r.Use(traceID, requestLog(log), recoverer(log))
+	r.Use(middleware.RealIP(trusted), middleware.RequestID(trusted), requestLog(log), middleware.Recoverer(log))
 	r.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"status":"ok"}`))
@@ -66,7 +68,7 @@ func New(cfg config.ServerConfig, log *slog.Logger) *Server {
 		log:             log,
 		shutdownTimeout: cfg.ShutdownTimeout,
 		shuttingDown:    shuttingDown,
-	}
+	}, nil
 }
 
 // Run escuta em cfg.Addr e serve até ctx ser cancelado (ver Serve).
@@ -108,41 +110,11 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 	return nil
 }
 
-func traceID(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		id := logger.NewTraceID()
-		w.Header().Set(TraceHeader, id)
-		next.ServeHTTP(w, r.WithContext(logger.WithTraceID(r.Context(), id)))
-	})
-}
-
-func recoverer(log *slog.Logger) func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			ww := middleware.NewWrapResponseWriter(w, r.ProtoMajor)
-			defer func() {
-				if rec := recover(); rec != nil {
-					if err, ok := rec.(error); ok && errors.Is(err, http.ErrAbortHandler) {
-						panic(rec)
-					}
-					log.ErrorContext(r.Context(), "panic no handler", "panic", fmt.Sprint(rec), "path", r.URL.Path)
-					// Com a resposta já começada, o status foi enviado: um 500
-					// agora só colaria texto no fim do corpo.
-					if ww.Status() == 0 {
-						http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
-					}
-				}
-			}()
-			next.ServeHTTP(ww, r)
-		})
-	}
-}
-
 func requestLog(log *slog.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			start := time.Now()
-			ww := middleware.NewWrapResponseWriter(w, r.ProtoMajor)
+			ww := chimw.NewWrapResponseWriter(w, r.ProtoMajor)
 			next.ServeHTTP(ww, r)
 			status := ww.Status()
 			if status == 0 { // handler não escreveu nada: o net/http responde 200
@@ -150,6 +122,7 @@ func requestLog(log *slog.Logger) func(http.Handler) http.Handler {
 			}
 			log.InfoContext(r.Context(), "requisição http",
 				"method", r.Method, "path", r.URL.Path, "status", status,
+				"client_ip", middleware.ClientIP(r.Context()).String(),
 				"bytes", ww.BytesWritten(), "duration", time.Since(start))
 		})
 	}

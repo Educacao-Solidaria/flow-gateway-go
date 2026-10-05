@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -17,6 +18,7 @@ import (
 
 	"github.com/Educacao-Solidaria/flow-gateway-go/internal/config"
 	"github.com/Educacao-Solidaria/flow-gateway-go/internal/logger"
+	"github.com/Educacao-Solidaria/flow-gateway-go/internal/middleware"
 )
 
 // syncBuffer evita data race entre o servidor escrevendo log e o teste lendo.
@@ -45,7 +47,18 @@ func newServer(t *testing.T, shutdown time.Duration) (*Server, *syncBuffer) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return New(cfg, log), logs
+	s, err := New(cfg, log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return s, logs
+}
+
+func TestNewRejectsInvalidTrustedProxy(t *testing.T) {
+	cfg := config.ServerConfig{Addr: "127.0.0.1:0", TrustedProxies: []string{"não-é-ip"}}
+	if _, err := New(cfg, slog.New(slog.NewTextHandler(io.Discard, nil))); err == nil {
+		t.Fatal("esperava erro para proxy confiável inválido")
+	}
 }
 
 func TestHealthz(t *testing.T) {
@@ -56,8 +69,8 @@ func TestHealthz(t *testing.T) {
 	if rec.Code != http.StatusOK || rec.Body.String() != `{"status":"ok"}` {
 		t.Fatalf("resposta inesperada: %d %s", rec.Code, rec.Body)
 	}
-	if len(rec.Header().Get(TraceHeader)) != 32 {
-		t.Errorf("header %s ausente ou fora do formato: %q", TraceHeader, rec.Header().Get(TraceHeader))
+	if len(rec.Header().Get(middleware.RequestIDHeader)) != 32 {
+		t.Errorf("header %s ausente ou fora do formato: %q", middleware.RequestIDHeader, rec.Header().Get(middleware.RequestIDHeader))
 	}
 }
 
@@ -66,10 +79,11 @@ func TestRequestLogCarriesTraceID(t *testing.T) {
 	rec := httptest.NewRecorder()
 	s.http.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/nao-existe", nil))
 
-	id := rec.Header().Get(TraceHeader)
+	id := rec.Header().Get(middleware.RequestIDHeader)
 	out := logs.String()
-	if !strings.Contains(out, `"trace_id":"`+id+`"`) || !strings.Contains(out, `"status":404`) {
-		t.Errorf("log da requisição sem trace_id/status: %s", out)
+	if !strings.Contains(out, `"trace_id":"`+id+`"`) || !strings.Contains(out, `"status":404`) ||
+		!strings.Contains(out, `"client_ip":"192.0.2.1"`) {
+		t.Errorf("log da requisição sem trace_id/status/client_ip: %s", out)
 	}
 }
 
@@ -83,23 +97,6 @@ func TestRecoverer(t *testing.T) {
 		t.Errorf("status = %d, want 500", rec.Code)
 	}
 	if out := logs.String(); !strings.Contains(out, "boom") || !strings.Contains(out, `"status":500`) {
-		t.Errorf("panic não registrado no log: %s", out)
-	}
-}
-
-func TestRecovererAfterResponseStarted(t *testing.T) {
-	s, logs := newServer(t, time.Second)
-	s.http.Handler.(*chi.Mux).Get("/panic-tarde", func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = io.WriteString(w, "parcial")
-		panic("boom")
-	})
-	rec := httptest.NewRecorder()
-	s.http.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/panic-tarde", nil))
-
-	if rec.Code != http.StatusOK || rec.Body.String() != "parcial" {
-		t.Errorf("recoverer escreveu depois da resposta começar: %d %q", rec.Code, rec.Body)
-	}
-	if out := logs.String(); !strings.Contains(out, "boom") {
 		t.Errorf("panic não registrado no log: %s", out)
 	}
 }

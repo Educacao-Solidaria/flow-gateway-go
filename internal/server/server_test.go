@@ -1,7 +1,6 @@
 package server
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -10,7 +9,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -18,36 +16,14 @@ import (
 
 	"github.com/Educacao-Solidaria/flow-gateway-go/internal/config"
 	"github.com/Educacao-Solidaria/flow-gateway-go/internal/health"
-	"github.com/Educacao-Solidaria/flow-gateway-go/internal/logger"
 	"github.com/Educacao-Solidaria/flow-gateway-go/internal/middleware"
+	"github.com/Educacao-Solidaria/flow-gateway-go/internal/testutil"
 )
 
-// syncBuffer evita data race entre o servidor escrevendo log e o teste lendo.
-type syncBuffer struct {
-	mu  sync.Mutex
-	buf bytes.Buffer
-}
-
-func (b *syncBuffer) Write(p []byte) (int, error) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.buf.Write(p)
-}
-
-func (b *syncBuffer) String() string {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.buf.String()
-}
-
-func newServer(t *testing.T, shutdown time.Duration) (*Server, *syncBuffer) {
+func newServer(t *testing.T, shutdown time.Duration) (*Server, *testutil.LogBuffer) {
 	t.Helper()
-	logs := &syncBuffer{}
 	cfg := config.ServerConfig{Addr: "127.0.0.1:0", ReadTimeout: time.Second, ShutdownTimeout: shutdown, HealthTimeout: time.Second}
-	log, err := logger.New(logs, "info", "json")
-	if err != nil {
-		t.Fatal(err)
-	}
+	log, logs := testutil.NewLogger(t)
 	s, err := New(cfg, log)
 	if err != nil {
 		t.Fatal(err)

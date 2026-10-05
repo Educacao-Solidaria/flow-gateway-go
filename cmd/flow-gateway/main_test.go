@@ -28,3 +28,13 @@ func TestRunInvalidConfig(t *testing.T) {
 		t.Fatalf("esperava erro de validação, veio %v", err)
 	}
 }
+
+func TestRunLogsStructured(t *testing.T) {
+	var out bytes.Buffer
+	if err := run([]string{"--env-file", "", "--log.format", "json"}, &out); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if !strings.Contains(out.String(), `"msg":"configuração carregada"`) {
+		t.Errorf("log estruturado ausente: %s", out.String())
+	}
+}

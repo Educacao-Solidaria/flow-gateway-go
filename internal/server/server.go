@@ -15,6 +15,7 @@ import (
 	chimw "github.com/go-chi/chi/v5/middleware"
 
 	"github.com/Educacao-Solidaria/flow-gateway-go/internal/config"
+	"github.com/Educacao-Solidaria/flow-gateway-go/internal/health"
 	"github.com/Educacao-Solidaria/flow-gateway-go/internal/middleware"
 )
 
@@ -38,19 +39,19 @@ func ShuttingDown(ctx context.Context) <-chan struct{} {
 	return ch
 }
 
-// New cria o servidor com as rotas base (/healthz). Falha se
-// cfg.TrustedProxies tiver entrada que não seja IP nem CIDR.
-func New(cfg config.ServerConfig, log *slog.Logger) (*Server, error) {
+// New cria o servidor com as rotas base: /livez (processo vivo) e /healthz
+// (probes das dependências, ver health.Checker). Falha se cfg.TrustedProxies
+// tiver entrada que não seja IP nem CIDR.
+func New(cfg config.ServerConfig, log *slog.Logger, probes ...health.Probe) (*Server, error) {
 	trusted, err := middleware.ParseTrustedProxies(cfg.TrustedProxies)
 	if err != nil {
 		return nil, err
 	}
 	r := chi.NewRouter()
 	r.Use(middleware.RealIP(trusted), middleware.RequestID(trusted), requestLog(log), middleware.Recoverer(log))
-	r.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"status":"ok"}`))
-	})
+	hc := health.New(log, cfg.HealthTimeout, probes...)
+	r.Get("/livez", hc.Live)
+	r.Get("/healthz", hc.Ready)
 
 	shuttingDown := make(chan struct{})
 	base := context.WithValue(context.Background(), shuttingDownKey{}, (<-chan struct{})(shuttingDown))

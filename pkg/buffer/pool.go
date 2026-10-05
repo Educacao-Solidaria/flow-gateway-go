@@ -7,7 +7,7 @@ import (
 )
 
 const (
-	DefaultInitialCap = 4096       // 4 KB inicial
+	DefaultInitialCap = 4096        // 4 KB inicial
 	DefaultMaxCap     = 1024 * 1024 // 1 MB teto para não reter na pool
 )
 

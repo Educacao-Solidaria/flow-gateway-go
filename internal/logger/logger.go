@@ -5,10 +5,12 @@ package logger
 import (
 	"context"
 	"crypto/rand"
+	"encoding/binary"
 	"encoding/hex"
 	"fmt"
 	"io"
 	"log/slog"
+	mrand "math/rand/v2"
 	"strings"
 )
 
@@ -36,10 +38,18 @@ func TraceID(ctx context.Context) string {
 	return id
 }
 
+// randRead é a fonte de entropia do trace_id; variável para o teste simular falha.
+var randRead = rand.Read
+
 // NewTraceID gera um trace_id aleatório de 128 bits em hex (formato W3C).
 func NewTraceID() string {
 	var b [16]byte
-	_, _ = rand.Read(b[:]) // crypto/rand.Read nunca falha (Go 1.24+)
+	if _, err := randRead(b[:]); err != nil {
+		// Antes do Go 1.24 crypto/rand.Read pode falhar (o go.mod aceita 1.23).
+		// trace_id não é segredo: math/rand/v2 basta para não devolver zeros.
+		binary.LittleEndian.PutUint64(b[:8], mrand.Uint64())
+		binary.LittleEndian.PutUint64(b[8:], mrand.Uint64())
+	}
 	return hex.EncodeToString(b[:])
 }
 

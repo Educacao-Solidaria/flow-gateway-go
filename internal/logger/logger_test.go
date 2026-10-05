@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"strings"
 	"testing"
@@ -107,5 +108,19 @@ func TestNewTraceID(t *testing.T) {
 	}
 	if a == b {
 		t.Error("dois trace_ids iguais")
+	}
+}
+
+func TestNewTraceIDFallbackQuandoRandFalha(t *testing.T) {
+	orig := randRead
+	t.Cleanup(func() { randRead = orig })
+	randRead = func([]byte) (int, error) { return 0, errors.New("sem entropia") }
+
+	a, b := NewTraceID(), NewTraceID()
+	if len(a) != 32 || a == strings.Repeat("0", 32) {
+		t.Errorf("fallback devolveu trace_id inválido: %q", a)
+	}
+	if a == b {
+		t.Error("fallback gerou dois trace_ids iguais")
 	}
 }

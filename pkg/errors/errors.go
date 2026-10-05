@@ -8,22 +8,22 @@ import (
 
 // Erros sentinela comuns de domínio do Gateway.
 var (
-	ErrModelNotFound    = errors.New("modelo nao suportado ou inexistente")
-	ErrRateLimited      = errors.New("limite de taxa de requisicoes excedido")
-	ErrUpstreamTimeout  = errors.New("timeout na comunicacao com o provedor upstream")
-	ErrInvalidPayload   = errors.New("payload de requisicao malformado ou invalido")
-	ErrUnauthorized     = errors.New("autenticacao ausente ou token invalido")
-	ErrCircuitOpen      = errors.New("circuito temporariamente aberto por falhas consecutivas")
+	ErrModelNotFound   = errors.New("modelo nao suportado ou inexistente")
+	ErrRateLimited     = errors.New("limite de taxa de requisicoes excedido")
+	ErrUpstreamTimeout = errors.New("timeout na comunicacao com o provedor upstream")
+	ErrInvalidPayload  = errors.New("payload de requisicao malformado ou invalido")
+	ErrUnauthorized    = errors.New("autenticacao ausente ou token invalido")
+	ErrCircuitOpen     = errors.New("circuito temporariamente aberto por falhas consecutivas")
 )
 
 // GatewayError é um erro de domínio enriquecido com metadados para HTTP e JSON-RPC.
 type GatewayError struct {
-	Err        error                  `json:"-"`
-	Code       string                 `json:"code"`
-	Message    string                 `json:"message"`
-	HTTPStatus int                    `json:"http_status"`
-	JSONRPCCode int                   `json:"jsonrpc_code"`
-	Details    map[string]interface{} `json:"details,omitempty"`
+	Err         error                  `json:"-"`
+	Code        string                 `json:"code"`
+	Message     string                 `json:"message"`
+	HTTPStatus  int                    `json:"http_status"`
+	JSONRPCCode int                    `json:"jsonrpc_code"`
+	Details     map[string]interface{} `json:"details,omitempty"`
 }
 
 func (e *GatewayError) Error() string {

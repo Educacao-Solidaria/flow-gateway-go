@@ -13,9 +13,9 @@ type ChunkHit struct {
 
 // SearchResult consolida os chunks encontrados na busca híbrida.
 type SearchResult struct {
-	Query            string     `json:"query"`
-	Hits             []ChunkHit `json:"hits"`
-	TotalFound       int        `json:"total_found"`
+	Query           string     `json:"query"`
+	Hits            []ChunkHit `json:"hits"`
+	TotalFound      int        `json:"total_found"`
 	ExecutionTimeMs float64    `json:"execution_time_ms"`
 }
 

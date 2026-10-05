@@ -96,6 +96,7 @@ func (b *LogBuffer) Entries(t testing.TB) []map[string]any {
 		require.NoError(t, json.Unmarshal(sc.Bytes(), &e), "linha de log: %s", sc.Text())
 		out = append(out, e)
 	}
+	require.NoError(t, sc.Err(), "lendo o log (linha acima de 64 KiB?)")
 	return out
 }
 

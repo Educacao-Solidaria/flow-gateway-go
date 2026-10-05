@@ -75,6 +75,17 @@ log:
 	}
 }
 
+func TestLoadTrustedProxiesFromEnv(t *testing.T) {
+	t.Setenv("FLOW_SERVER_TRUSTED_PROXIES", "10.0.0.0/8,192.168.1.1")
+	cfg, err := load(t, "--env-file", "")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got := strings.Join(cfg.Server.TrustedProxies, "|"); got != "10.0.0.0/8|192.168.1.1" {
+		t.Errorf("trusted_proxies = %q", got)
+	}
+}
+
 func TestLoadRejectsUnknownKey(t *testing.T) {
 	yaml := writeFile(t, "config.yaml", "server:\n  adress: \":9000\"\n")
 	_, err := load(t, "--config", yaml, "--env-file", "")

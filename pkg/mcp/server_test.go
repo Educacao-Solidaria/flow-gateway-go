@@ -13,7 +13,7 @@ type MockTool struct {
 	name string
 }
 
-func (m *MockTool) Name() string { return m.name }
+func (m *MockTool) Name() string        { return m.name }
 func (m *MockTool) Description() string { return "Mock description" }
 func (m *MockTool) InputSchema() map[string]interface{} {
 	return map[string]interface{}{"type": "object"}

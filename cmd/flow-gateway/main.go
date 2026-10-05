@@ -9,6 +9,7 @@ import (
 	"github.com/spf13/pflag"
 
 	"github.com/Educacao-Solidaria/flow-gateway-go/internal/config"
+	"github.com/Educacao-Solidaria/flow-gateway-go/internal/logger"
 	"github.com/Educacao-Solidaria/flow-gateway-go/internal/version"
 )
 
@@ -31,8 +32,14 @@ func run(args []string, stdout io.Writer) error {
 		_, err := fmt.Fprintln(stdout, version.String())
 		return err
 	}
-	if _, err := config.Load(fs); err != nil {
+	cfg, err := config.Load(fs)
+	if err != nil {
 		return err
 	}
+	log, err := logger.New(stdout, cfg.Log.Level, cfg.Log.Format)
+	if err != nil {
+		return err
+	}
+	log.Info("configuração carregada", "version", version.Version, "env", cfg.Env, "addr", cfg.Server.Addr)
 	return nil
 }

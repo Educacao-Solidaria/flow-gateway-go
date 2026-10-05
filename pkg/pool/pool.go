@@ -9,10 +9,10 @@ import (
 )
 
 var (
-	ErrPoolClosed   = errors.New("worker pool já encerrado")
-	ErrQueueFull    = errors.New("fila do worker pool está cheia")
-	ErrTaskTimeout  = errors.New("tempo limite para submissao de tarefa expirado")
-	ErrNilTask      = errors.New("tarefa nao pode ser nula")
+	ErrPoolClosed  = errors.New("worker pool já encerrado")
+	ErrQueueFull   = errors.New("fila do worker pool está cheia")
+	ErrTaskTimeout = errors.New("tempo limite para submissao de tarefa expirado")
+	ErrNilTask     = errors.New("tarefa nao pode ser nula")
 )
 
 // Task define uma unidade de trabalho assíncrona executada por um worker da pool.

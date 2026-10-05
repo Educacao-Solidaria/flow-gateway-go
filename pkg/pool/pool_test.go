@@ -2,6 +2,7 @@ package pool_test
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -66,13 +67,13 @@ func TestSimplePool_QueueFullAndTimeout(t *testing.T) {
 
 	// Tarefa 3: deve falhar imediatamente com ErrQueueFull
 	err = p.Submit(func(ctx context.Context) {})
-	if err != pool.ErrQueueFull {
+	if !errors.Is(err, pool.ErrQueueFull) {
 		t.Fatalf("esperava ErrQueueFull, obteve %v", err)
 	}
 
 	// Tarefa 4 com timeout curto: deve falhar com ErrTaskTimeout
 	err = p.SubmitWithTimeout(func(ctx context.Context) {}, 10*time.Millisecond)
-	if err != pool.ErrTaskTimeout {
+	if !errors.Is(err, pool.ErrTaskTimeout) {
 		t.Fatalf("esperava ErrTaskTimeout, obteve %v", err)
 	}
 
@@ -82,7 +83,7 @@ func TestSimplePool_QueueFullAndTimeout(t *testing.T) {
 func TestSimplePool_NilTaskAndStop(t *testing.T) {
 	p := pool.NewSimplePool(pool.Config{Workers: 2, QueueCapacity: 10})
 
-	if err := p.Submit(nil); err != pool.ErrNilTask {
+	if err := p.Submit(nil); !errors.Is(err, pool.ErrNilTask) {
 		t.Fatalf("esperava ErrNilTask, obteve %v", err)
 	}
 
@@ -90,7 +91,7 @@ func TestSimplePool_NilTaskAndStop(t *testing.T) {
 
 	// Tentativa apos stop
 	err := p.Submit(func(ctx context.Context) {})
-	if err != pool.ErrPoolClosed {
+	if !errors.Is(err, pool.ErrPoolClosed) {
 		t.Fatalf("esperava ErrPoolClosed, obteve %v", err)
 	}
 }

@@ -87,6 +87,23 @@ func TestRecoverer(t *testing.T) {
 	}
 }
 
+func TestRecovererAfterResponseStarted(t *testing.T) {
+	s, logs := newServer(t, time.Second)
+	s.http.Handler.(*chi.Mux).Get("/panic-tarde", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, "parcial")
+		panic("boom")
+	})
+	rec := httptest.NewRecorder()
+	s.http.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/panic-tarde", nil))
+
+	if rec.Code != http.StatusOK || rec.Body.String() != "parcial" {
+		t.Errorf("recoverer escreveu depois da resposta começar: %d %q", rec.Code, rec.Body)
+	}
+	if out := logs.String(); !strings.Contains(out, "boom") {
+		t.Errorf("panic não registrado no log: %s", out)
+	}
+}
+
 // serveSlow sobe o servidor com uma rota que só responde quando release fecha
 // e devolve o canal com o resultado de Serve.
 func serveSlow(t *testing.T, s *Server, release <-chan struct{}) (cancel context.CancelFunc, addr string, done <-chan error) {
@@ -147,5 +164,37 @@ func TestGracefulShutdownTimeout(t *testing.T) {
 	cancel()
 	if err := <-done; !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("esperava estouro do prazo, veio %v", err)
+	}
+}
+
+func TestShutdownSignalsLongHandlers(t *testing.T) {
+	s, _ := newServer(t, 5*time.Second)
+	s.http.Handler.(*chi.Mux).Get("/sse", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, "data: oi\n\n")
+		w.(http.Flusher).Flush()
+		<-ShuttingDown(r.Context())
+	})
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- s.Serve(ctx, ln) }()
+
+	resp, err := http.Get("http://" + ln.Addr().String() + "/sse")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("Serve: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("shutdown esperou o handler longo em vez de sinalizá-lo")
 	}
 }

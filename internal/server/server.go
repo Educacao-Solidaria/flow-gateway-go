@@ -26,6 +26,19 @@ type Server struct {
 	http            *http.Server
 	log             *slog.Logger
 	shutdownTimeout time.Duration
+	shuttingDown    chan struct{}
+}
+
+type shuttingDownKey struct{}
+
+// ShuttingDown devolve um canal que fecha quando o servidor começa a encerrar.
+// Handlers longos (SSE, streaming) devem selecionar nele para fechar a
+// resposta; o shutdown só espera por eles até ShutdownTimeout. Requisições
+// comuns não precisam: o contexto delas não é cancelado e o shutdown as
+// espera terminar. Fora de uma requisição servida por Server, devolve nil.
+func ShuttingDown(ctx context.Context) <-chan struct{} {
+	ch, _ := ctx.Value(shuttingDownKey{}).(<-chan struct{})
+	return ch
 }
 
 // New cria o servidor com as rotas base (/healthz).
@@ -37,6 +50,8 @@ func New(cfg config.ServerConfig, log *slog.Logger) *Server {
 		_, _ = w.Write([]byte(`{"status":"ok"}`))
 	})
 
+	shuttingDown := make(chan struct{})
+	base := context.WithValue(context.Background(), shuttingDownKey{}, (<-chan struct{})(shuttingDown))
 	return &Server{
 		http: &http.Server{
 			Addr:              cfg.Addr,
@@ -46,9 +61,11 @@ func New(cfg config.ServerConfig, log *slog.Logger) *Server {
 			WriteTimeout:      cfg.WriteTimeout,
 			IdleTimeout:       2 * time.Minute,
 			ErrorLog:          slog.NewLogLogger(log.Handler(), slog.LevelError),
+			BaseContext:       func(net.Listener) context.Context { return base },
 		},
 		log:             log,
 		shutdownTimeout: cfg.ShutdownTimeout,
+		shuttingDown:    shuttingDown,
 	}
 }
 
@@ -61,9 +78,10 @@ func (s *Server) Run(ctx context.Context) error {
 	return s.Serve(ctx, ln)
 }
 
-// Serve atende em ln até ctx ser cancelado; então para de aceitar conexões e
-// espera as requisições em curso por até ShutdownTimeout. Estourado o prazo,
-// fecha as conexões restantes e devolve o erro do prazo.
+// Serve atende em ln até ctx ser cancelado; então fecha o canal de
+// ShuttingDown, para de aceitar conexões e espera as requisições em curso por
+// até ShutdownTimeout. Estourado o prazo, fecha as conexões restantes e
+// devolve o erro do prazo. Serve só pode ser chamado uma vez por Server.
 func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 	errCh := make(chan error, 1)
 	go func() { errCh <- s.http.Serve(ln) }()
@@ -76,6 +94,7 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 	}
 
 	s.log.Info("encerrando servidor", "timeout", s.shutdownTimeout)
+	close(s.shuttingDown) // avisa os handlers longos (ver ShuttingDown)
 	shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), s.shutdownTimeout)
 	defer cancel()
 	if err := s.http.Shutdown(shutdownCtx); err != nil {
@@ -100,16 +119,21 @@ func traceID(next http.Handler) http.Handler {
 func recoverer(log *slog.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ww := middleware.NewWrapResponseWriter(w, r.ProtoMajor)
 			defer func() {
 				if rec := recover(); rec != nil {
 					if err, ok := rec.(error); ok && errors.Is(err, http.ErrAbortHandler) {
 						panic(rec)
 					}
 					log.ErrorContext(r.Context(), "panic no handler", "panic", fmt.Sprint(rec), "path", r.URL.Path)
-					http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+					// Com a resposta já começada, o status foi enviado: um 500
+					// agora só colaria texto no fim do corpo.
+					if ww.Status() == 0 {
+						http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+					}
 				}
 			}()
-			next.ServeHTTP(w, r)
+			next.ServeHTTP(ww, r)
 		})
 	}
 }

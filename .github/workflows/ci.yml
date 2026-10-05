@@ -63,3 +63,13 @@ jobs:
           fi
       - name: go mod tidy
         run: go mod tidy -diff
+
+  cross:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version: stable
+      - name: make cross
+        run: make cross && ls -l dist/

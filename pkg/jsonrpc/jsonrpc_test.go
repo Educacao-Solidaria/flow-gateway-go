@@ -2,6 +2,7 @@ package jsonrpc_test
 
 import (
 	"encoding/json"
+	"errors"
 	"testing"
 
 	"github.com/Educacao-Solidaria/flow-gateway-go/pkg/jsonrpc"
@@ -40,13 +41,13 @@ func TestParseRequest_Notification(t *testing.T) {
 func TestParseRequest_ValidationErrors(t *testing.T) {
 	// Versão inválida
 	_, err := jsonrpc.ParseRequest([]byte(`{"jsonrpc":"1.0","id":1,"method":"ping"}`))
-	if err != jsonrpc.ErrInvalidVersion {
+	if !errors.Is(err, jsonrpc.ErrInvalidVersion) {
 		t.Fatalf("esperava ErrInvalidVersion, obteve: %v", err)
 	}
 
 	// Método vazio
 	_, err = jsonrpc.ParseRequest([]byte(`{"jsonrpc":"2.0","id":1,"method":""}`))
-	if err != jsonrpc.ErrEmptyMethod {
+	if !errors.Is(err, jsonrpc.ErrEmptyMethod) {
 		t.Fatalf("esperava ErrEmptyMethod, obteve: %v", err)
 	}
 }

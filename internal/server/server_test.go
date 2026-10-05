@@ -17,6 +17,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/Educacao-Solidaria/flow-gateway-go/internal/config"
+	"github.com/Educacao-Solidaria/flow-gateway-go/internal/health"
 	"github.com/Educacao-Solidaria/flow-gateway-go/internal/logger"
 	"github.com/Educacao-Solidaria/flow-gateway-go/internal/middleware"
 )
@@ -42,7 +43,7 @@ func (b *syncBuffer) String() string {
 func newServer(t *testing.T, shutdown time.Duration) (*Server, *syncBuffer) {
 	t.Helper()
 	logs := &syncBuffer{}
-	cfg := config.ServerConfig{Addr: "127.0.0.1:0", ReadTimeout: time.Second, ShutdownTimeout: shutdown}
+	cfg := config.ServerConfig{Addr: "127.0.0.1:0", ReadTimeout: time.Second, ShutdownTimeout: shutdown, HealthTimeout: time.Second}
 	log, err := logger.New(logs, "info", "json")
 	if err != nil {
 		t.Fatal(err)
@@ -66,11 +67,34 @@ func TestHealthz(t *testing.T) {
 	rec := httptest.NewRecorder()
 	s.http.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/healthz", nil))
 
-	if rec.Code != http.StatusOK || rec.Body.String() != `{"status":"ok"}` {
+	if rec.Code != http.StatusOK || !strings.HasPrefix(rec.Body.String(), `{"status":"ok","uptime_seconds":`) {
 		t.Fatalf("resposta inesperada: %d %s", rec.Code, rec.Body)
 	}
 	if len(rec.Header().Get(middleware.RequestIDHeader)) != 32 {
 		t.Errorf("header %s ausente ou fora do formato: %q", middleware.RequestIDHeader, rec.Header().Get(middleware.RequestIDHeader))
+	}
+}
+
+func TestHealthzUsesProbes(t *testing.T) {
+	cfg := config.ServerConfig{Addr: "127.0.0.1:0", ReadTimeout: time.Second, ShutdownTimeout: time.Second, HealthTimeout: time.Second}
+	down := health.NewProbe("cache", func(context.Context) error { return errors.New("fora do ar") })
+	s, err := New(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)), down)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	s.http.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/healthz", nil))
+	if rec.Code != http.StatusServiceUnavailable || !strings.Contains(rec.Body.String(), `"cache":{"status":"fail"`) {
+		t.Fatalf("resposta inesperada: %d %s", rec.Code, rec.Body)
+	}
+}
+
+func TestLivez(t *testing.T) {
+	s, _ := newServer(t, time.Second)
+	rec := httptest.NewRecorder()
+	s.http.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/livez", nil))
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"status":"ok"`) {
+		t.Fatalf("resposta inesperada: %d %s", rec.Code, rec.Body)
 	}
 }
 

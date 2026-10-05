@@ -74,9 +74,14 @@ func New(w io.Writer, level, format string) (*slog.Logger, error) {
 	return slog.New(traceHandler{h}), nil
 }
 
+// keySeparators é montado uma vez: NewReplacer por chamada custava ~1,4 KB por
+// atributo em todo registro de log (ver BenchmarkLogger). Replacer é seguro
+// para uso concorrente.
+var keySeparators = strings.NewReplacer("_", "", "-", "", ".", "")
+
 // IsSensitive informa se um atributo com esse nome deve ser mascarado.
 func IsSensitive(key string) bool {
-	k := strings.NewReplacer("_", "", "-", "", ".", "").Replace(strings.ToLower(key))
+	k := keySeparators.Replace(strings.ToLower(key))
 	for _, s := range sensitiveSuffixes {
 		if strings.HasSuffix(k, s) {
 			return true

@@ -3,6 +3,7 @@ package contracts_test
 import (
 	"context"
 	"encoding/json"
+	stderrors "errors"
 	"strings"
 	"testing"
 
@@ -47,8 +48,8 @@ func TestPhase1Contracts_ToolNotFound(t *testing.T) {
 		t.Fatal("esperava erro para ferramenta inexistente")
 	}
 
-	gatewayErr, ok := err.(*errors.GatewayError)
-	if !ok {
+	var gatewayErr *errors.GatewayError
+	if !stderrors.As(err, &gatewayErr) {
 		t.Fatalf("esperava GatewayError, obteve %T", err)
 	}
 	if gatewayErr.Code != "TOOL_NOT_FOUND" {

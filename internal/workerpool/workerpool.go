@@ -1,7 +1,8 @@
 // Package workerpool implementa o contrato pool.WorkerPool (pkg/pool) com fila
 // limitada e backpressure: a submissão nunca espera além do que o chamador
-// aceitou, toda tarefa aceita é executada, panic em tarefa não derruba o
-// worker e o encerramento espera o que já foi aceito.
+// aceitou, toda tarefa aceita é entregue a um worker (nenhuma fica esquecida
+// na fila), panic em tarefa não derruba o worker e o encerramento espera o que
+// já foi aceito.
 package workerpool
 
 import (
@@ -170,8 +171,9 @@ func (p *Pool) RunningWorkers() int {
 // pool.ErrPoolClosed — e espera os workers executarem tudo o que já foi
 // aceito, inclusive o que estava na fila. Se ctx acabar antes, cancela o
 // contexto das tarefas e devolve ctx.Err() sem esperar as que ignoram o
-// cancelamento; as que ainda estavam na fila são chamadas mesmo assim, com o
-// contexto já cancelado, para que nenhuma tarefa aceita suma sem ser vista.
+// cancelamento; as que ainda estavam na fila seguem sendo entregues, com o
+// contexto já cancelado, aos workers que se liberarem (enquanto o processo
+// viver), para que nenhuma tarefa aceita suma sem ser vista.
 // Pode ser chamado de novo (devolve nil depois que tudo terminou), mas não de
 // dentro de uma tarefa: ela esperaria por si mesma.
 func (p *Pool) Shutdown(ctx context.Context) error {

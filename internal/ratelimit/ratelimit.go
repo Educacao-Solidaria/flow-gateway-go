@@ -35,7 +35,8 @@ type Config struct {
 	Burst int
 	// MaxKeys limita quantas chaves ficam em memória: cada IP ou API key nova
 	// cria um balde, e sem teto quem gira chaves esgota a memória. Com o teto
-	// atingido e nada ocioso para limpar, chave nova é recusada.
+	// atingido, chave nova é recusada até uma limpeza liberar vaga (as
+	// limpezas são espaçadas por sweepEvery).
 	MaxKeys int
 }
 

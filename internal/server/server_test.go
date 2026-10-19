@@ -90,6 +90,23 @@ func TestRequestLogCarriesTraceID(t *testing.T) {
 	}
 }
 
+func TestTraceparentJoinsRequestLog(t *testing.T) {
+	const traceID = "4bf92f3577b34da6a3ce929d0e0e4736"
+	log, logs := testutil.NewLogger(t)
+	s, err := New(config.ServerConfig{ReadTimeout: time.Second, ShutdownTimeout: time.Second, HealthTimeout: time.Second,
+		TrustedProxies: []string{"192.0.2.1"}}, log) // o RemoteAddr do httptest
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/livez", nil)
+	req.Header.Set("traceparent", "00-"+traceID+"-00f067aa0ba902b7-01")
+	rec := httptest.NewRecorder()
+	s.http.Handler.ServeHTTP(rec, req)
+	if id := rec.Header().Get(middleware.RequestIDHeader); id != traceID || !strings.Contains(logs.String(), `"trace_id":"`+traceID+`"`) {
+		t.Errorf("trace W3C não chegou ao X-Request-Id (%q) e ao log: %s", id, logs.String())
+	}
+}
+
 func TestRecoverer(t *testing.T) {
 	s, logs := newServer(t, time.Second)
 	s.http.Handler.(*chi.Mux).Get("/panic", func(http.ResponseWriter, *http.Request) { panic("boom") })

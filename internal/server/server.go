@@ -1,5 +1,6 @@
 // Package server monta o servidor HTTP base do gateway: roteador chi,
-// middlewares de IP real, request id, log e recover, e encerramento gracioso.
+// middlewares de IP real, request id, log, recover e compressão, e
+// encerramento gracioso.
 package server
 
 import (
@@ -48,7 +49,8 @@ func New(cfg config.ServerConfig, log *slog.Logger, probes ...health.Probe) (*Se
 		return nil, err
 	}
 	r := chi.NewRouter()
-	r.Use(middleware.RealIP(trusted), middleware.RequestID(trusted), requestLog(log), middleware.Recoverer(log))
+	// A compressão fica por último: o log conta os bytes que de fato saem.
+	r.Use(middleware.RealIP(trusted), middleware.RequestID(trusted), requestLog(log), middleware.Recoverer(log), middleware.Compress())
 	hc := health.New(log, cfg.HealthTimeout, probes...)
 	r.Get("/livez", hc.Live)
 	r.Get("/healthz", hc.Ready)

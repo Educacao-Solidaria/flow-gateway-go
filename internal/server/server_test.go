@@ -49,6 +49,9 @@ func TestHealthz(t *testing.T) {
 	if len(rec.Header().Get(middleware.RequestIDHeader)) != 32 {
 		t.Errorf("header %s ausente ou fora do formato: %q", middleware.RequestIDHeader, rec.Header().Get(middleware.RequestIDHeader))
 	}
+	if rec.Header().Get("Vary") != "Accept-Encoding" {
+		t.Errorf("compressão não montada: Vary = %q", rec.Header().Get("Vary"))
+	}
 }
 
 func TestHealthzUsesProbes(t *testing.T) {

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"runtime"
 	"strconv"
@@ -22,6 +23,7 @@ import (
 	"github.com/Educacao-Solidaria/flow-gateway-go/internal/config"
 	"github.com/Educacao-Solidaria/flow-gateway-go/internal/httpclient"
 	"github.com/Educacao-Solidaria/flow-gateway-go/internal/lifecycle"
+	"github.com/Educacao-Solidaria/flow-gateway-go/internal/metrics"
 	"github.com/Educacao-Solidaria/flow-gateway-go/internal/ratelimit"
 	"github.com/Educacao-Solidaria/flow-gateway-go/internal/resilience"
 	"github.com/Educacao-Solidaria/flow-gateway-go/internal/ringbuffer"
@@ -101,7 +103,7 @@ func (upstream) StreamChatCompletion(context.Context, *domain.ChatCompletionRequ
 }
 
 // TestPipelineUnderLoad solta as goroutines de uma vez (barreira) no caminho
-// completo de uma requisição: rate limit por tenant → worker pool →
+// completo de uma requisição: métricas → rate limit por tenant → worker pool →
 // singleflight → fallback com disjuntor por modelo → HTTP com trace → mock. O
 // sucesso vai para o ring buffer e para o state, limpo pelo supervisor. Um
 // terço pede o modelo "ruim", cujo mock só devolve 503: o disjuntor dele abre e
@@ -143,65 +145,75 @@ func TestPipelineUnderLoad(t *testing.T) {
 	executed := make([]atomic.Int32, n)
 	submitted := make([]bool, n) // cada índice só é escrito pela própria goroutine
 	traces := map[string]bool{}
+	var lat metrics.Latency
+	request := func(ctx context.Context, i int) {
+		tenant := "t" + strconv.Itoa(i%tenants)
+		if ok, _ := limiter.Allow(tenant); !ok {
+			rejected.Add(1)
+			return
+		}
+		ctx, cancel := context.WithCancel(ctx)
+		defer cancel()
+		if i%10 == 0 {
+			cancel() // desiste antes de enfileirar
+		}
+		model := "bom"
+		if i%3 == 0 {
+			model = "ruim"
+		}
+		req := &domain.ChatCompletionRequest{Model: model, TenantID: tenant,
+			Messages: []domain.ChatMessage{{Role: domain.RoleUser, Content: "pergunta " + strconv.Itoa(i%7)}}}
+		type result struct {
+			resp *domain.ChatCompletionResponse
+			err  error
+		}
+		done := make(chan result, 1)
+		if err := workers.SubmitContext(ctx, func(context.Context) {
+			executed[i].Add(1)
+			resp, err := client.CreateChatCompletion(ctx, req)
+			done <- result{resp, err}
+		}); err != nil {
+			assert.ErrorIs(t, err, context.Canceled, "goroutine %d", i)
+			assert.Zero(t, i%10, "goroutine %d recusada sem desistir", i)
+			gaveUp.Add(1)
+			return
+		}
+		submitted[i] = true
+		if i%10 == 1 {
+			cancel() // desiste com a tarefa na fila ou em voo
+		}
+		r := <-done
+		if r.err != nil {
+			assert.ErrorIs(t, r.err, context.Canceled, "goroutine %d", i)
+			assert.Equal(t, 1, i%10, "goroutine %d falhou sem desistir: %v", i, r.err)
+			gaveUp.Add(1)
+			return
+		}
+		assert.Equal(t, "bom", r.resp.Model, "goroutine %d: o ruim nunca serve", i)
+		ring.Push(i)
+		assert.NoError(t, store.Set(strconv.Itoa(i), r.resp.ID, time.Hour))
+		served.Add(1)
+	}
 	start := make(chan struct{})
 	var wg sync.WaitGroup
 	for i := 0; i < n; i++ {
 		sc := tracing.New()
 		traces[sc.TraceID.String()] = true
 		wg.Add(1)
-		go func(i int, ctx context.Context) {
+		go func(ctx context.Context) {
 			defer wg.Done()
 			<-start
-			tenant := "t" + strconv.Itoa(i%tenants)
-			if ok, _ := limiter.Allow(tenant); !ok {
-				rejected.Add(1)
-				return
-			}
-			ctx, cancel := context.WithCancel(ctx)
-			defer cancel()
-			if i%10 == 0 {
-				cancel() // desiste antes de enfileirar
-			}
-			model := "bom"
-			if i%3 == 0 {
-				model = "ruim"
-			}
-			req := &domain.ChatCompletionRequest{Model: model, TenantID: tenant,
-				Messages: []domain.ChatMessage{{Role: domain.RoleUser, Content: "pergunta " + strconv.Itoa(i%7)}}}
-			type result struct {
-				resp *domain.ChatCompletionResponse
-				err  error
-			}
-			done := make(chan result, 1)
-			if err := workers.SubmitContext(ctx, func(context.Context) {
-				executed[i].Add(1)
-				resp, err := client.CreateChatCompletion(ctx, req)
-				done <- result{resp, err}
-			}); err != nil {
-				assert.ErrorIs(t, err, context.Canceled, "goroutine %d", i)
-				assert.Zero(t, i%10, "goroutine %d recusada sem desistir", i)
-				gaveUp.Add(1)
-				return
-			}
-			submitted[i] = true
-			if i%10 == 1 {
-				cancel() // desiste com a tarefa na fila ou em voo
-			}
-			r := <-done
-			if r.err != nil {
-				assert.ErrorIs(t, r.err, context.Canceled, "goroutine %d", i)
-				assert.Equal(t, 1, i%10, "goroutine %d falhou sem desistir: %v", i, r.err)
-				gaveUp.Add(1)
-				return
-			}
-			assert.Equal(t, "bom", r.resp.Model, "goroutine %d: o ruim nunca serve", i)
-			ring.Push(i)
-			assert.NoError(t, store.Set(strconv.Itoa(i), r.resp.ID, time.Hour))
-			served.Add(1)
-		}(i, tracing.WithContext(context.Background(), sc))
+			// Cada pedido passa pelo middleware de métricas, como uma requisição HTTP do gateway.
+			metrics.Middleware(&lat)(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+				request(ctx, i)
+			})).ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/", nil))
+		}(tracing.WithContext(context.Background(), sc))
 	}
 	close(start)
 	wg.Wait()
+	m := lat.Snapshot()
+	assert.Zero(t, m.Active, "gauge de requisições ativas de volta a zero")
+	assert.EqualValues(t, n, m.Count, "toda requisição medida, recusadas e desistências inclusive")
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	require.NoError(t, workers.Shutdown(ctx))

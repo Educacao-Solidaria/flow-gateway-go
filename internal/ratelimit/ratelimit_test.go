@@ -50,6 +50,28 @@ func TestNewValidates(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+func TestHoldRefusesUntilTheWaitEnds(t *testing.T) {
+	l, clock := newTestLimiter(t, Config{Rate: 10, Burst: 3, MaxKeys: 10})
+	l.Hold("up", 0)
+	l.Hold("up", -time.Second)
+	for i := 0; i < 3; i++ {
+		require.True(t, allow(l, "up"), "Hold sem espera não segura nem gasta a rajada (%d)", i)
+	}
+	l.Hold("up", 2*time.Second)
+	l.Hold("up", time.Second) // um Hold menor não encurta o anterior
+	ok, wait := l.Allow("up")
+	assert.False(t, ok)
+	assert.Equal(t, 2*time.Second, wait)
+	assert.True(t, allow(l, "outra"), "as outras chaves não esperam")
+
+	clock.Add(int64(2 * time.Second))
+	assert.True(t, allow(l, "up"), "acabada a espera, volta a passar")
+	l.Hold("enorme", time.Duration(math.MaxInt64)) // sem estouro de int64
+	ok, wait = l.Allow("enorme")
+	assert.False(t, ok)
+	assert.Positive(t, wait)
+}
+
 func TestAllowBurstAndRefill(t *testing.T) {
 	l, clock := newTestLimiter(t, Config{Rate: 10, Burst: 3, MaxKeys: 10}) // recarga de 1 a cada 100ms
 	for i := 0; i < 3; i++ {

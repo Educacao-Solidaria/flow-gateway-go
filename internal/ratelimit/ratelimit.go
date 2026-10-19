@@ -105,6 +105,34 @@ func (l *Limiter) Allow(key string) (ok bool, retryAfter time.Duration) {
 	}
 }
 
+// Hold segura key por d: até lá, Allow(key) recusa, com o retryAfter dessa
+// espera. É o controle preventivo que a cota informada pelo upstream alimenta
+// (internal/quota): o gateway recusa sozinho em vez de insistir num 429. d <= 0
+// não faz nada; a espera só cresce (um Hold menor não encurta o anterior); com
+// o teto de chaves atingido, a chave nova fica sem espera.
+func (l *Limiter) Hold(key string, d time.Duration) {
+	if d <= 0 {
+		return
+	}
+	now := l.now()
+	// Allow recusa enquanto o TAT passa de agora+tolerance; o teto em d evita estourar o int64.
+	until := now + int64(min(d, math.MaxInt64/4)) + l.tolerance
+	for {
+		b := l.bucket(key, now)
+		if b == nil {
+			return
+		}
+		tat := b.tat.Load()
+		if tat == dead {
+			l.buckets.CompareAndDelete(key, b) // a limpeza o tirou; busca outro
+			continue
+		}
+		if tat >= until || b.tat.CompareAndSwap(tat, until) {
+			return
+		}
+	}
+}
+
 // bucket devolve o balde de key, criando um cheio se preciso; nil com o teto de
 // chaves atingido.
 func (l *Limiter) bucket(key string, now int64) *bucket {

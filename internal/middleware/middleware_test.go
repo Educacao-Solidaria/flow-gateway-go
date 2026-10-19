@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/Educacao-Solidaria/flow-gateway-go/internal/logger"
+	"github.com/Educacao-Solidaria/flow-gateway-go/internal/tracing"
 )
 
 func mustTrusted(t *testing.T, list ...string) TrustedProxies {
@@ -109,6 +110,47 @@ func TestRequestID(t *testing.T) {
 			}
 			if !c.keep && len(got) != 32 {
 				t.Errorf("esperava id gerado de 32 hex, veio %q", got)
+			}
+		})
+	}
+}
+
+func TestTraceContextFeedsRequestID(t *testing.T) {
+	const traceID = "4bf92f3577b34da6a3ce929d0e0e4736"
+	for _, c := range []struct {
+		name, remote, inboundID string
+		continues               bool
+	}{
+		{"proxy confiável continua o trace", "10.0.0.1:1", "", true},
+		{"cliente direto recomeça o trace", "203.0.113.9:1", "", false},
+		{"id do proxy prevalece no X-Request-Id", "10.0.0.1:1", "lb-1", true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			var sc tracing.SpanContext
+			var logID string
+			trusted := mustTrusted(t, "10.0.0.0/8")
+			h := TraceContext(trusted)(RequestID(trusted)(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+				sc, _ = tracing.FromContext(r.Context())
+				logID = logger.TraceID(r.Context())
+			})))
+			r := httptest.NewRequest(http.MethodGet, "/", nil)
+			r.RemoteAddr = c.remote
+			r.Header.Set(tracing.TraceparentHeader, "00-"+traceID+"-00f067aa0ba902b7-01")
+			if c.inboundID != "" {
+				r.Header.Set(RequestIDHeader, c.inboundID)
+			}
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, r)
+
+			if got := sc.TraceID.String() == traceID; got != c.continues {
+				t.Errorf("trace continuado = %v, want %v (trace-id %s)", got, c.continues, sc.TraceID)
+			}
+			want := sc.TraceID.String() // sem id do proxy, o request id é o trace-id
+			if c.inboundID != "" {
+				want = c.inboundID
+			}
+			if got := rec.Header().Get(RequestIDHeader); got != want || logID != want {
+				t.Errorf("X-Request-Id %q e trace_id do log %q, want %q", got, logID, want)
 			}
 		})
 	}

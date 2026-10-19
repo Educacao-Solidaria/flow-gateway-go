@@ -1,5 +1,6 @@
 // Package middleware reúne os middlewares HTTP de correlação e resiliência do
-// gateway: request id, IP real do cliente e recuperação de panic.
+// gateway: trace context W3C, request id, IP real do cliente e recuperação de
+// panic.
 package middleware
 
 import (
@@ -15,6 +16,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 
 	"github.com/Educacao-Solidaria/flow-gateway-go/internal/logger"
+	"github.com/Educacao-Solidaria/flow-gateway-go/internal/tracing"
 )
 
 // RequestIDHeader carrega o request id na entrada (vindo de proxy confiável) e
@@ -24,9 +26,9 @@ const RequestIDHeader = "X-Request-Id"
 // maxRequestIDLen limita o id aceito de fora: ele vai para todo log da requisição.
 const maxRequestIDLen = 128
 
-// TrustedProxies são as redes cujos cabeçalhos de encaminhamento
-// (X-Forwarded-For, X-Real-IP, X-Request-Id) o gateway aceita. Vazio, nenhum
-// cabeçalho do cliente é aceito.
+// TrustedProxies são as redes cujos cabeçalhos de encaminhamento e correlação
+// (X-Forwarded-For, X-Real-IP, X-Request-Id, traceparent e tracestate) o
+// gateway aceita. Vazio, nenhum cabeçalho do cliente é aceito.
 type TrustedProxies []netip.Prefix
 
 // ParseTrustedProxies aceita CIDRs ("10.0.0.0/8") e IPs avulsos ("10.0.0.1").
@@ -115,20 +117,48 @@ func RealIP(trusted TrustedProxies) func(http.Handler) http.Handler {
 	}
 }
 
+// TraceContext continua o trace W3C (traceparent e tracestate) recebido de
+// proxy confiável, ou começa um novo, e o guarda no contexto com o span id
+// deste salto (tracing.FromContext; tracing.Inject nas chamadas de saída). De
+// cliente direto o trace sempre recomeça: ele não escolhe o trace-id dos logs,
+// não força amostragem nem passa tracestate adiante. Monte antes de RequestID.
+func TraceContext(trusted TrustedProxies) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var sc tracing.SpanContext
+			if trusted.contains(peer(r)) {
+				sc = tracing.FromHeaders(r.Header)
+			} else {
+				sc = tracing.New()
+			}
+			next.ServeHTTP(w, r.WithContext(tracing.WithContext(r.Context(), sc)))
+		})
+	}
+}
+
 // RequestID correlaciona a requisição: reaproveita o X-Request-Id recebido de
-// proxy confiável (se bem formado) ou gera um novo, devolve-o no cabeçalho da
-// resposta e o injeta no contexto como trace_id do logger.
+// proxy confiável (se bem formado) ou usa o trace-id do TraceContext (sem ele,
+// gera um id no mesmo formato), devolve-o no cabeçalho da resposta e o injeta
+// no contexto como trace_id do logger. Sem id do proxy, então, o trace_id dos
+// logs é o trace-id W3C, e as requisições de um mesmo trace compartilham o id.
 func RequestID(trusted TrustedProxies) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			id := r.Header.Get(RequestIDHeader)
 			if !validRequestID(id) || !trusted.contains(peer(r)) {
-				id = logger.NewTraceID()
+				id = newRequestID(r.Context())
 			}
 			w.Header().Set(RequestIDHeader, id)
 			next.ServeHTTP(w, r.WithContext(logger.WithTraceID(r.Context(), id)))
 		})
 	}
+}
+
+func newRequestID(ctx context.Context) string {
+	if sc, ok := tracing.FromContext(ctx); ok {
+		return sc.TraceID.String()
+	}
+	return logger.NewTraceID()
 }
 
 // validRequestID aceita só [A-Za-z0-9._:-]: nada de espaço, aspas ou quebra de

@@ -39,8 +39,9 @@ type ServerConfig struct {
 	// HealthTimeout limita cada rodada de probes do /healthz.
 	HealthTimeout time.Duration `mapstructure:"health_timeout"`
 	// TrustedProxies lista IPs/CIDRs dos proxies cujos X-Forwarded-For,
-	// X-Real-IP e X-Request-Id são aceitos. Vazio: nenhum é aceito. No
-	// ambiente, separados por vírgula (FLOW_SERVER_TRUSTED_PROXIES).
+	// X-Real-IP, X-Request-Id, traceparent e tracestate são aceitos. Vazio:
+	// nenhum é aceito. No ambiente, separados por vírgula
+	// (FLOW_SERVER_TRUSTED_PROXIES).
 	TrustedProxies []string `mapstructure:"trusted_proxies"`
 }
 

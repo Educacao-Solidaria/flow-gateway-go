@@ -32,6 +32,16 @@ type Options struct {
 	// Fallbacks lista, por modelo pedido, as alternativas em ordem. Modelo
 	// fora do mapa tem uma tentativa só. Quem serviu fica no Model da resposta.
 	Fallbacks map[string][]string
+	// Gate, se não for nil, é consultado antes de cada tentativa.
+	Gate Gate
+}
+
+// Gate decide, por modelo, se a tentativa sai (circuitbreaker.Models): erro pula
+// o modelo sem gastar janela. report recebe o resultado: nil (no stream, já no
+// primeiro chunk), o erro do upstream (janela vencida como ErrUpstreamTimeout) ou
+// context.Canceled quando o chamador acabou (desistiu ou o prazo dele venceu).
+type Gate interface {
+	Allow(model string) (report func(error), err error)
 }
 
 // Fallback é um openrouter.Client que dá uma janela a cada tentativa e, em
@@ -77,6 +87,11 @@ func (f *Fallback) CreateChatCompletion(ctx context.Context, req *domain.ChatCom
 		if err != nil {
 			return nil, err
 		}
+		report, err := f.allow(model)
+		if err != nil { // circuito aberto: a próxima alternativa, sem gastar janela
+			last = err
+			continue
+		}
 		actx, cancel := context.WithCancelCause(ctx)
 		stop := f.after(window, func() { cancel(errAttemptTimeout) })
 		own := *req // cópia rasa: o upstream só lê, e a do chamador fica intacta
@@ -85,11 +100,14 @@ func (f *Fallback) CreateChatCompletion(ctx context.Context, req *domain.ChatCom
 		stop()
 		cancel(nil)
 		if err == nil { // a que chega junto com o fim da janela vale: já foi paga
+			report(nil)
 			return resp, nil
 		}
-		if last, err = classify(ctx, actx, model, window, err); err != nil {
+		retry, err := classify(ctx, actx, model, window, err, report)
+		if !retry {
 			return nil, err
 		}
+		last = err
 	}
 	return nil, last
 }
@@ -109,6 +127,11 @@ func (f *Fallback) StreamChatCompletion(ctx context.Context, req *domain.ChatCom
 		if err != nil {
 			return nil, nil, err
 		}
+		report, err := f.allow(model)
+		if err != nil {
+			last = err
+			continue
+		}
 		actx, cancel := context.WithCancelCause(ctx)
 		stop := f.after(window, func() { cancel(errAttemptTimeout) })
 		own := *req
@@ -124,6 +147,7 @@ func (f *Fallback) StreamChatCompletion(ctx context.Context, req *domain.ChatCom
 			// o modelo; o erro final, se houver, vai para o chamador.
 			if got || actx.Err() == nil {
 				if stop() {
+					report(nil)
 					out, outErr := forward(ctx, func() { cancel(nil) }, got, first, chunks, errs)
 					return out, outErr, nil
 				}
@@ -133,9 +157,11 @@ func (f *Fallback) StreamChatCompletion(ctx context.Context, req *domain.ChatCom
 		}
 		stop()
 		cancel(nil)
-		if last, err = classify(ctx, actx, model, window, err); err != nil {
+		retry, err := classify(ctx, actx, model, window, err, report)
+		if !retry {
 			return nil, nil, err
 		}
+		last = err
 	}
 	return nil, nil, last
 }
@@ -157,19 +183,26 @@ func (f *Fallback) window(begin time.Time, i int, last error) (time.Duration, er
 	return w, nil
 }
 
-// classify decide o que fazer com o erro de uma tentativa: stop não nil encerra
-// a cascata; senão, last é o erro (já traduzido) e a próxima alternativa segue.
-func classify(ctx, actx context.Context, model string, window time.Duration, err error) (last, stop error) {
+// classify traduz o erro de uma tentativa (janela vencida vira timeout), passa
+// o resultado ao report e diz se a próxima alternativa vale a pena.
+func classify(ctx, actx context.Context, model string, window time.Duration, err error, report func(error)) (retry bool, _ error) {
 	if ctx.Err() != nil { // o chamador desistiu ou o prazo dele venceu: outra tentativa não serve a ninguém
-		return nil, ctx.Err()
+		report(context.Canceled)
+		return false, ctx.Err()
 	}
 	if errors.Is(context.Cause(actx), errAttemptTimeout) {
 		err = fmt.Errorf("%w: %s não respondeu em %s", gwerrors.ErrUpstreamTimeout, model, window)
 	}
-	if !retryable(err) {
-		return nil, err
+	report(err)
+	return retryable(err), err
+}
+
+// allow consulta o Gate; sem Gate, tudo passa.
+func (f *Fallback) allow(model string) (func(error), error) {
+	if f.opts.Gate == nil {
+		return func(error) {}, nil
 	}
-	return err, nil
+	return f.opts.Gate.Allow(model)
 }
 
 // retryable diz se vale tentar outro modelo depois de err: prazo (do transporte

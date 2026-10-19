@@ -37,6 +37,13 @@ func (u *fake) StreamChatCompletion(ctx context.Context, req *domain.ChatComplet
 	return u.stream(ctx, req.Model)
 }
 
+// gate é um Gate que anota o resultado de cada tentativa.
+type gate struct{ reports []error }
+
+func (g *gate) Allow(string) (func(error), error) {
+	return func(err error) { g.reports = append(g.reports, err) }, nil
+}
+
 func newFallback(t *testing.T, up *fake, opts Options) *Fallback {
 	t.Helper()
 	if opts.AttemptTimeout == 0 {
@@ -104,7 +111,8 @@ func TestTimeoutFallsBackToNextModel(t *testing.T) {
 		defer func() { cause = context.Cause(ctx) }()
 		return hang(ctx)
 	}}
-	f := newFallback(t, up, Options{Fallbacks: chain})
+	g := &gate{}
+	f := newFallback(t, up, Options{Fallbacks: chain, Gate: g})
 	fire = manual(f)
 
 	resp, err := f.CreateChatCompletion(context.Background(), ask("a"))
@@ -112,6 +120,9 @@ func TestTimeoutFallsBackToNextModel(t *testing.T) {
 	assert.Equal(t, "b", resp.Model)
 	assert.Equal(t, []string{"a", "b"}, up.calls)
 	assert.ErrorIs(t, cause, gwerrors.ErrUpstreamTimeout, "a tentativa lenta foi cancelada com a causa de timeout")
+	require.Len(t, g.reports, 2, "um resultado por tentativa")
+	assert.ErrorIs(t, g.reports[0], gwerrors.ErrUpstreamTimeout)
+	assert.NoError(t, g.reports[1])
 }
 
 func TestOnlyRetryableErrorsFallBack(t *testing.T) {
@@ -150,7 +161,8 @@ func TestCallerGivingUpStopsTheCascade(t *testing.T) {
 		cancel() // o chamador desiste com a chamada em curso
 		return hang(actx)
 	}}
-	f := newFallback(t, up, Options{Fallbacks: chain})
+	g := &gate{}
+	f := newFallback(t, up, Options{Fallbacks: chain, Gate: g})
 	_, err := f.CreateChatCompletion(ctx, ask("a"))
 	assert.ErrorIs(t, err, context.Canceled)
 	assert.True(t, inherited.Equal(deadline), "a tentativa herda o prazo do chamador")
@@ -161,6 +173,7 @@ func TestCallerGivingUpStopsTheCascade(t *testing.T) {
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 	assert.NotErrorIs(t, err, gwerrors.ErrUpstreamTimeout, "o prazo vencido é do chamador, não do upstream")
 	assert.Equal(t, []string{"a", "a"}, up.calls, "desistência e prazo do chamador não acionam alternativa")
+	assert.Equal(t, []error{context.Canceled, context.Canceled}, g.reports, "e não contam contra o upstream")
 }
 
 func TestBudgetShrinksTheWindowAndStopsTheCascade(t *testing.T) {
@@ -231,11 +244,15 @@ func TestStreamFallsBackOnlyBeforeTheFirstChunk(t *testing.T) {
 		}
 		return words(ctx, model, true, exited, "x", "y")
 	}}
-	f := newFallback(t, up, Options{Fallbacks: chain})
+	g := &gate{}
+	f := newFallback(t, up, Options{Fallbacks: chain, Gate: g})
 	fire = manual(f)
 	ctx, cancel := context.WithCancel(context.Background())
 	chunks, errs, err := f.StreamChatCompletion(ctx, ask("a"))
 	require.NoError(t, err)
+	require.Len(t, g.reports, 2, "o primeiro chunk já conta como sucesso")
+	assert.ErrorIs(t, g.reports[0], gwerrors.ErrUpstreamTimeout)
+	assert.NoError(t, g.reports[1])
 	recv(t, fire)() // a janela de "b" vence com "y" ainda no upstream: não pode cortar nem trocar
 
 	assert.Equal(t, domain.StreamChunk{Model: "b", DeltaContent: "x"}, recv(t, chunks))

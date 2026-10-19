@@ -40,6 +40,21 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.Server.ShutdownTimeout != 15*time.Second || cfg.Server.WriteTimeout != 0 {
 		t.Errorf("timeouts inesperados: %+v", cfg.Server)
 	}
+	if o := cfg.OpenRouter; o.ResponseHeaderTimeout != 60*time.Second || o.MaxIdleConnsPerHost != 64 || o.MaxConnsPerHost != 0 {
+		t.Errorf("pool do upstream inesperado: %+v", o)
+	}
+}
+
+func TestLoadUpstreamPoolFromEnv(t *testing.T) {
+	t.Setenv("FLOW_OPENROUTER_RESPONSE_HEADER_TIMEOUT", "2m")
+	t.Setenv("FLOW_OPENROUTER_MAX_CONNS_PER_HOST", "128")
+	cfg, err := load(t, "--env-file", "")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.OpenRouter.ResponseHeaderTimeout != 2*time.Minute || cfg.OpenRouter.MaxConnsPerHost != 128 {
+		t.Errorf("o ambiente não chegou ao pool: %+v", cfg.OpenRouter)
+	}
 }
 
 func TestLoadPrecedence(t *testing.T) {
@@ -106,6 +121,9 @@ func TestValidate(t *testing.T) {
 		{"production sem api key", []string{"--env", "production"}, nil, "openrouter.api_key"},
 		{"base url sem esquema", nil, map[string]string{"FLOW_OPENROUTER_BASE_URL": "openrouter.ai"}, "base_url"},
 		{"shutdown zerado", []string{"--server.shutdown_timeout", "0s"}, nil, "shutdown_timeout"},
+		{"dial do upstream zerado", nil, map[string]string{"FLOW_OPENROUTER_DIAL_TIMEOUT": "0s"}, "openrouter.dial_timeout"},
+		{"pool sem conexão ociosa", nil, map[string]string{"FLOW_OPENROUTER_MAX_IDLE_CONNS_PER_HOST": "0"}, "max_idle_conns_per_host"},
+		{"teto de conexões negativo", nil, map[string]string{"FLOW_OPENROUTER_MAX_CONNS_PER_HOST": "-1"}, "max_conns_per_host"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

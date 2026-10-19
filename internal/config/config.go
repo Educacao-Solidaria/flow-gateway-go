@@ -54,6 +54,16 @@ type LogConfig struct {
 type OpenRouterConfig struct {
 	BaseURL string `mapstructure:"base_url"`
 	APIKey  string `mapstructure:"api_key"`
+	// Prazos por fase e pool de conexões do cliente HTTP (internal/httpclient).
+	// Não há prazo total: a duração de uma chamada, stream SSE inclusive, é do ctx.
+	DialTimeout           time.Duration `mapstructure:"dial_timeout"`
+	TLSHandshakeTimeout   time.Duration `mapstructure:"tls_handshake_timeout"`
+	ResponseHeaderTimeout time.Duration `mapstructure:"response_header_timeout"`
+	IdleConnTimeout       time.Duration `mapstructure:"idle_conn_timeout"`
+	TCPKeepAlive          time.Duration `mapstructure:"tcp_keep_alive"`
+	MaxIdleConnsPerHost   int           `mapstructure:"max_idle_conns_per_host"`
+	// MaxConnsPerHost 0 desliga o teto de conexões simultâneas.
+	MaxConnsPerHost int `mapstructure:"max_conns_per_host"`
 }
 
 var defaults = map[string]any{
@@ -68,6 +78,15 @@ var defaults = map[string]any{
 	"log.format":              "json",
 	"openrouter.base_url":     "https://openrouter.ai/api/v1",
 	"openrouter.api_key":      "",
+	// O 200 da OpenRouter sai quando o provedor aceita a requisição, antes do
+	// primeiro token: 60s cobrem fila e cold start sem esperar a geração inteira.
+	"openrouter.dial_timeout":            5 * time.Second,
+	"openrouter.tls_handshake_timeout":   10 * time.Second,
+	"openrouter.response_header_timeout": 60 * time.Second,
+	"openrouter.idle_conn_timeout":       90 * time.Second,
+	"openrouter.tcp_keep_alive":          30 * time.Second,
+	"openrouter.max_idle_conns_per_host": 64, // o padrão do Go é 2: um gateway num host só reabriria conexão o tempo todo
+	"openrouter.max_conns_per_host":      0,
 }
 
 // RegisterFlags declara em fs as flags aceitas por Load. Segredos (api_key)
@@ -183,6 +202,12 @@ func (c *Config) Validate() error {
 	}
 	if u, err := url.Parse(c.OpenRouter.BaseURL); err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" {
 		errs = append(errs, fmt.Errorf("openrouter.base_url %q não é uma URL http(s)", c.OpenRouter.BaseURL))
+	}
+	if o := c.OpenRouter; o.DialTimeout <= 0 || o.TLSHandshakeTimeout <= 0 || o.ResponseHeaderTimeout <= 0 || o.IdleConnTimeout <= 0 || o.TCPKeepAlive <= 0 {
+		errs = append(errs, errors.New("openrouter.dial_timeout, tls_handshake_timeout, response_header_timeout, idle_conn_timeout e tcp_keep_alive devem ser positivos"))
+	}
+	if c.OpenRouter.MaxIdleConnsPerHost < 1 || c.OpenRouter.MaxConnsPerHost < 0 {
+		errs = append(errs, errors.New("openrouter.max_idle_conns_per_host deve ser >= 1 e openrouter.max_conns_per_host >= 0 (0 = sem teto)"))
 	}
 	if c.Env == "production" && c.OpenRouter.APIKey == "" {
 		errs = append(errs, errors.New("openrouter.api_key é obrigatória em production (FLOW_OPENROUTER_API_KEY)"))

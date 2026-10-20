@@ -25,7 +25,8 @@ var errAttemptTimeout = fmt.Errorf("%w: janela da tentativa esgotada", gwerrors.
 
 // Options configura o Fallback.
 type Options struct {
-	// AttemptTimeout (obrigatório) é a janela de cada tentativa; no stream, até o primeiro chunk.
+	// AttemptTimeout é a janela de cada tentativa; no stream, até o primeiro
+	// chunk. Obrigatório sem Timeouts.
 	AttemptTimeout time.Duration
 	// Budget limita a soma das janelas; 0 deixa só as janelas e o prazo do chamador.
 	Budget time.Duration
@@ -34,6 +35,18 @@ type Options struct {
 	Fallbacks map[string][]string
 	// Gate, se não for nil, é consultado antes de cada tentativa.
 	Gate Gate
+	// Timeouts, se não for nil, dá a janela por modelo no lugar do
+	// AttemptTimeout (adaptivetimeout.Timeouts) e aprende com cada tentativa.
+	Timeouts Timeouts
+}
+
+// Timeouts dá a janela (positiva) da tentativa no modelo e aprende com ela:
+// Observe recebe quanto a tentativa levou até responder (no stream, até o 1º
+// chunk) ou, se a janela venceu, a janela inteira (a latência real foi maior).
+// Desistência do chamador, erro e janela cortada pelo Budget não ensinam nada.
+type Timeouts interface {
+	Timeout(model string, stream bool) time.Duration
+	Observe(model string, stream bool, took time.Duration)
 }
 
 // Gate decide, por modelo, se a tentativa sai (circuitbreaker.Models): erro pula
@@ -58,8 +71,8 @@ var _ openrouter.Client = (*Fallback)(nil)
 
 // New envolve next; as cascatas são copiadas.
 func New(next openrouter.Client, opts Options) (*Fallback, error) {
-	if next == nil || opts.AttemptTimeout <= 0 || opts.Budget < 0 {
-		return nil, errors.New("resilience: next é obrigatório, AttemptTimeout positivo e Budget não negativo")
+	if next == nil || opts.AttemptTimeout < 0 || opts.AttemptTimeout == 0 && opts.Timeouts == nil || opts.Budget < 0 {
+		return nil, errors.New("resilience: next é obrigatório, AttemptTimeout positivo (ou Timeouts) e Budget não negativo")
 	}
 	chains := make(map[string][]string, len(opts.Fallbacks))
 	for model, alts := range opts.Fallbacks {
@@ -83,7 +96,7 @@ func (f *Fallback) CreateChatCompletion(ctx context.Context, req *domain.ChatCom
 	var last error
 	begin := f.now()
 	for i, model := range append([]string{req.Model}, f.opts.Fallbacks[req.Model]...) {
-		window, err := f.window(begin, i, last)
+		window, full, err := f.window(begin, i, last, model, false)
 		if err != nil {
 			return nil, err
 		}
@@ -96,14 +109,16 @@ func (f *Fallback) CreateChatCompletion(ctx context.Context, req *domain.ChatCom
 		stop := f.after(window, func() { cancel(errAttemptTimeout) })
 		own := *req // cópia rasa: o upstream só lê, e a do chamador fica intacta
 		own.Model = model
+		start := f.now()
 		resp, err := f.next.CreateChatCompletion(actx, &own)
 		stop()
 		cancel(nil)
 		if err == nil { // a que chega junto com o fim da janela vale: já foi paga
 			report(nil)
+			f.observe(model, false, f.now().Sub(start))
 			return resp, nil
 		}
-		retry, err := classify(ctx, actx, model, window, err, report)
+		retry, err := f.classify(ctx, actx, model, false, full, window, err, report)
 		if !retry {
 			return nil, err
 		}
@@ -123,7 +138,7 @@ func (f *Fallback) StreamChatCompletion(ctx context.Context, req *domain.ChatCom
 	var last error
 	begin := f.now()
 	for i, model := range append([]string{req.Model}, f.opts.Fallbacks[req.Model]...) {
-		window, err := f.window(begin, i, last)
+		window, full, err := f.window(begin, i, last, model, true)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -136,6 +151,7 @@ func (f *Fallback) StreamChatCompletion(ctx context.Context, req *domain.ChatCom
 		stop := f.after(window, func() { cancel(errAttemptTimeout) })
 		own := *req
 		own.Model = model
+		start := f.now()
 		chunks, errs, err := f.next.StreamChatCompletion(actx, &own)
 		if err == nil {
 			first, got := domain.StreamChunk{}, false
@@ -148,6 +164,7 @@ func (f *Fallback) StreamChatCompletion(ctx context.Context, req *domain.ChatCom
 			if got || actx.Err() == nil {
 				if stop() {
 					report(nil)
+					f.observe(model, true, f.now().Sub(start))
 					out, outErr := forward(ctx, func() { cancel(nil) }, got, first, chunks, errs)
 					return out, outErr, nil
 				}
@@ -157,7 +174,7 @@ func (f *Fallback) StreamChatCompletion(ctx context.Context, req *domain.ChatCom
 		}
 		stop()
 		cancel(nil)
-		retry, err := classify(ctx, actx, model, window, err, report)
+		retry, err := f.classify(ctx, actx, model, true, full, window, err, report)
 		if !retry {
 			return nil, nil, err
 		}
@@ -166,31 +183,48 @@ func (f *Fallback) StreamChatCompletion(ctx context.Context, req *domain.ChatCom
 	return nil, nil, last
 }
 
-// window é a janela da tentativa i: AttemptTimeout ou o que sobra do
-// orçamento, o que for menor; erro quando o orçamento acabou.
-func (f *Fallback) window(begin time.Time, i int, last error) (time.Duration, error) {
+// window é a janela da tentativa i no modelo: a do Timeouts (ou o
+// AttemptTimeout) ou o que sobra do orçamento, o que for menor; full diz que o
+// orçamento não a cortou. Erro quando o orçamento acabou.
+func (f *Fallback) window(begin time.Time, i int, last error, model string, stream bool) (_ time.Duration, full bool, _ error) {
 	w := f.opts.AttemptTimeout
+	if f.opts.Timeouts != nil {
+		w = f.opts.Timeouts.Timeout(model, stream)
+	}
 	if budget := f.opts.Budget; budget > 0 {
 		left := budget - f.now().Sub(begin)
 		if left <= 0 {
 			// A última falha vai só como texto: embrulhada, um GatewayError dela
 			// (ex.: 502) mudaria o status desta resposta, que é de timeout (504).
-			return 0, fmt.Errorf("%w: orçamento de %s esgotado após %d tentativa(s) (última: %s)",
+			return 0, false, fmt.Errorf("%w: orçamento de %s esgotado após %d tentativa(s) (última: %s)",
 				gwerrors.ErrUpstreamTimeout, budget, i, fmt.Sprint(last))
 		}
-		w = min(w, left)
+		if left < w {
+			return left, false, nil
+		}
 	}
-	return w, nil
+	return w, true, nil
 }
 
-// classify traduz o erro de uma tentativa (janela vencida vira timeout), passa
-// o resultado ao report e diz se a próxima alternativa vale a pena.
-func classify(ctx, actx context.Context, model string, window time.Duration, err error, report func(error)) (retry bool, _ error) {
+// observe ensina o Timeouts, se houver.
+func (f *Fallback) observe(model string, stream bool, took time.Duration) {
+	if f.opts.Timeouts != nil {
+		f.opts.Timeouts.Observe(model, stream, took)
+	}
+}
+
+// classify traduz o erro de uma tentativa (janela vencida vira timeout e,
+// inteira, ensina o Timeouts), passa o resultado ao report e diz se a próxima
+// alternativa vale a pena.
+func (f *Fallback) classify(ctx, actx context.Context, model string, stream, full bool, window time.Duration, err error, report func(error)) (retry bool, _ error) {
 	if ctx.Err() != nil { // o chamador desistiu ou o prazo dele venceu: outra tentativa não serve a ninguém
 		report(context.Canceled)
 		return false, ctx.Err()
 	}
 	if errors.Is(context.Cause(actx), errAttemptTimeout) {
+		if full {
+			f.observe(model, stream, window)
+		}
 		err = fmt.Errorf("%w: %s não respondeu em %s", gwerrors.ErrUpstreamTimeout, model, window)
 	}
 	report(err)

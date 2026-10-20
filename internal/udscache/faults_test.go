@@ -26,6 +26,10 @@ const hitPayload = `{"hit":true,"score":0.97,"cached_response":"resposta guardad
 // nunca com um hit pela metade), não há a quem mandar ERROR, e a chamada
 // seguinte disca de novo e recebe a resposta inteira.
 func TestResponseCutAtAnyByteFailsOnlyThatRequest(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("o AF_UNIX do Windows às vezes não entrega o fechamento do par (visto no CI: um dos cortes esperou até o prazo); " +
+			"e no v1 o cliente nem tem par no Windows, onde o servidor fala named pipe")
+	}
 	var n atomic.Int32
 	path, accepts := serve(t, func(nc net.Conn, f ipc.Frame) {
 		raw, _ := ipc.Append(nil, ipc.Frame{Kind: ipc.KindLookupResp, RequestID: f.RequestID, Payload: []byte(hitPayload)})

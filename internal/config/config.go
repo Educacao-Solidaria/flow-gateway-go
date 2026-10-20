@@ -27,6 +27,7 @@ type Config struct {
 	Server     ServerConfig     `mapstructure:"server"`
 	Log        LogConfig        `mapstructure:"log"`
 	OpenRouter OpenRouterConfig `mapstructure:"openrouter"`
+	Cache      CacheConfig      `mapstructure:"cache"`
 }
 
 // ServerConfig configura o servidor HTTP.
@@ -67,6 +68,12 @@ type OpenRouterConfig struct {
 	MaxConnsPerHost int `mapstructure:"max_conns_per_host"`
 }
 
+// CacheConfig configura o cliente do semantic-cache-rs (IPC v1, docs/ipc-v1.md).
+type CacheConfig struct {
+	// SocketPath é o Unix domain socket do semantic-cache-rs.
+	SocketPath string `mapstructure:"socket_path"`
+}
+
 var defaults = map[string]any{
 	"env":                     "development",
 	"server.addr":             ":8080",
@@ -88,6 +95,7 @@ var defaults = map[string]any{
 	"openrouter.tcp_keep_alive":          30 * time.Second,
 	"openrouter.max_idle_conns_per_host": 64, // o padrão do Go é 2: um gateway num host só reabriria conexão o tempo todo
 	"openrouter.max_conns_per_host":      0,
+	"cache.socket_path":                  "/tmp/semantic-cache.sock",
 }
 
 // RegisterFlags declara em fs as flags aceitas por Load. Segredos (api_key)
@@ -209,6 +217,9 @@ func (c *Config) Validate() error {
 	}
 	if c.OpenRouter.MaxIdleConnsPerHost < 1 || c.OpenRouter.MaxConnsPerHost < 0 {
 		errs = append(errs, errors.New("openrouter.max_idle_conns_per_host deve ser >= 1 e openrouter.max_conns_per_host >= 0 (0 = sem teto)"))
+	}
+	if c.Cache.SocketPath == "" {
+		errs = append(errs, errors.New("cache.socket_path é obrigatório"))
 	}
 	if c.Env == "production" && c.OpenRouter.APIKey == "" {
 		errs = append(errs, errors.New("openrouter.api_key é obrigatória em production (FLOW_OPENROUTER_API_KEY)"))

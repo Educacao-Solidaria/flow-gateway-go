@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -20,9 +21,8 @@ import (
 	"github.com/Educacao-Solidaria/flow-gateway-go/pkg/client/cache"
 )
 
-// serve sobe um semantic-cache de mentira que fala IPC v1, num caminho curto (o
-// de socket tem teto de 104 bytes no macOS, e o t.TempDir() leva o nome do
-// teste). handle recebe cada pedido na goroutine da conexão.
+// serve sobe um semantic-cache de mentira que fala IPC v1 num caminho curto (teto de 104
+// bytes no macOS; o t.TempDir() leva o nome do teste). handle roda na goroutine da conexão.
 func serve(t *testing.T, handle func(nc net.Conn, f ipc.Frame)) (string, *atomic.Int32) {
 	dir, err := os.MkdirTemp("", "sc")
 	require.NoError(t, err)
@@ -117,10 +117,7 @@ func TestPipelineCancelAndClose(t *testing.T) {
 	defer c.Close()
 	lento := func(ctx context.Context) chan error {
 		errc := make(chan error, 1)
-		go func() {
-			_, err := c.Lookup(ctx, "lento", nil, 0.9)
-			errc <- err
-		}()
+		go func() { _, err := c.Lookup(ctx, "lento", nil, 0.9); errc <- err }()
 		return errc
 	}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -186,6 +183,11 @@ func TestReconnectAndBackoff(t *testing.T) {
 }
 
 func TestStalledServerHitsWriteTimeout(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("o AF_UNIX do Windows aceita a escrita inteira sem o par ler (visto no CI): a escrita não trava")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second) // nunca pendura o teste
+	defer cancel()
 	stall := make(chan struct{})
 	defer close(stall)
 	path, _ := serve(t, func(nc net.Conn, f ipc.Frame) { // responde o 1º pedido e para de ler
@@ -195,10 +197,10 @@ func TestStalledServerHitsWriteTimeout(t *testing.T) {
 	c := New(path)
 	c.writeTimeout = 50 * time.Millisecond
 	defer c.Close()
-	_, err := c.Stats(context.Background())
+	_, err := c.Stats(ctx)
 	require.NoError(t, err)
 	// 15 MiB não cabem no buffer do socket: a escrita trava até o prazo.
-	err = c.Store(context.Background(), "p", strings.Repeat("x", 15<<20), nil, 0)
+	err = c.Store(ctx, "p", strings.Repeat("x", 15<<20), nil, 0)
 	require.ErrorIs(t, err, os.ErrDeadlineExceeded)
 	assert.True(t, c.cur.dead(), "escrita parcial descarta a conexão")
 }

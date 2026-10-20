@@ -91,8 +91,7 @@ func (c *Client) Stats(ctx context.Context) (*cache.StatsResult, error) {
 	return call[cache.StatsResult](ctx, c, ipc.KindStatsReq, struct{}{}, ipc.KindStatsResp)
 }
 
-// Close fecha a conexão, falha os pedidos pendentes com ErrClosed e espera o
-// leitor sair. Chamadas depois dele devolvem ErrClosed.
+// Close falha os pendentes com ErrClosed, espera o leitor sair e vale para sempre.
 func (c *Client) Close() error {
 	c.lock <- struct{}{}
 	if c.closed = true; c.cur != nil {
@@ -201,11 +200,7 @@ func (cn *conn) roundTrip(ctx context.Context, kind ipc.Kind, payload []byte, wr
 	if err != nil {
 		return ipc.Frame{}, err
 	}
-	defer func() {
-		cn.mu.Lock()
-		delete(cn.pending, id)
-		cn.mu.Unlock()
-	}()
+	defer func() { cn.mu.Lock(); delete(cn.pending, id); cn.mu.Unlock() }()
 	raw, err := ipc.Append(nil, ipc.Frame{Kind: kind, RequestID: id, Payload: payload})
 	if err != nil { // payload acima de 16 MiB: o pedido não sai, a conexão segue
 		return ipc.Frame{}, fmt.Errorf("udscache: %w", err)

@@ -43,6 +43,16 @@ func TestLoadDefaults(t *testing.T) {
 	if o := cfg.OpenRouter; o.ResponseHeaderTimeout != 60*time.Second || o.MaxIdleConnsPerHost != 64 || o.MaxConnsPerHost != 0 {
 		t.Errorf("pool do upstream inesperado: %+v", o)
 	}
+	if cfg.Cache.SocketPath != "/tmp/semantic-cache.sock" {
+		t.Errorf("cache.socket_path = %q", cfg.Cache.SocketPath)
+	}
+}
+
+func TestCacheSocketPathRequired(t *testing.T) {
+	yaml := writeFile(t, "config.yaml", "cache:\n  socket_path: \"\"\n")
+	if _, err := load(t, "--config", yaml, "--env-file", ""); err == nil || !strings.Contains(err.Error(), "cache.socket_path") {
+		t.Fatalf("esperava erro de cache.socket_path vazio, veio %v", err)
+	}
 }
 
 func TestLoadUpstreamPoolFromEnv(t *testing.T) {

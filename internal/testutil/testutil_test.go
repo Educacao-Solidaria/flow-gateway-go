@@ -4,7 +4,6 @@ import (
 	"context"
 	"io"
 	"net/http"
-	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -78,14 +77,12 @@ func TestNewLoggerCapturesEntries(t *testing.T) {
 	assert.Equal(t, logger.Redacted, entries[0]["api_key"])
 }
 
-func TestNoGoroutineLeakWaitsForTheExit(t *testing.T) {
-	before := runtime.NumGoroutine()
-	exited := make(chan struct{})
-	go func() { time.Sleep(20 * time.Millisecond); close(exited) }()
-	NoGoroutineLeak(t, before) // a goroutine ainda dorme: tem de esperar a saída, não falhar
-	select {
-	case <-exited:
-	default:
-		t.Fatal("voltou com a goroutine ainda viva")
-	}
+// O contador é injetado: goroutine de verdade de outro teste que termina no
+// meio baixaria a contagem e faria a espera acabar cedo (instável no CI).
+func TestSettleWaitsForTheCountToDrop(t *testing.T) {
+	reads := 0
+	n := settle(func() int { reads++; return 5 - reads/3 }, 4, 5*time.Second) // 5, 5, 4
+	assert.Equal(t, 4, n)
+	assert.Equal(t, 3, reads, "espera até a contagem voltar, e não além")
+	assert.Equal(t, 5, settle(func() int { return 5 }, 4, 0), "paciência esgotada: devolve o que sobrou")
 }

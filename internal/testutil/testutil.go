@@ -120,8 +120,15 @@ func NewLogger(t testing.TB) (*slog.Logger, *LogBuffer) {
 // goroutine própria, e a conta fica sempre uma acima.)
 func NoGoroutineLeak(t testing.TB, before int) {
 	t.Helper()
-	for deadline := time.Now().Add(10 * time.Second); runtime.NumGoroutine() > before && time.Now().Before(deadline); {
+	assert.LessOrEqual(t, settle(runtime.NumGoroutine, before, 10*time.Second), before, "goroutine sobrando depois do encerramento")
+}
+
+// settle lê count até ele voltar a before ou a paciência acabar, e devolve a
+// última leitura.
+func settle(count func() int, before int, patience time.Duration) int {
+	n := count()
+	for deadline := time.Now().Add(patience); n > before && time.Now().Before(deadline); n = count() {
 		time.Sleep(10 * time.Millisecond)
 	}
-	assert.LessOrEqual(t, runtime.NumGoroutine(), before, "goroutine sobrando depois do encerramento")
+	return n
 }

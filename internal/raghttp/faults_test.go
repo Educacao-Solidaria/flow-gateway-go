@@ -62,6 +62,7 @@ func TestCutOnEveryAttemptDegradesToNoContext(t *testing.T) {
 	c, calls := fake(t, func(_ int32, _ string, w http.ResponseWriter, _ *http.Request) {
 		cut(w, resp, len(resp)-len(searchOK)/2)
 	})
+	c.searchTimeout = 2 * time.Second // pausa do runner não troca o corte por prazo vencido
 	got, err := c.HybridSearch(context.Background(), "q", 5, 0.5)
 	require.ErrorIs(t, err, errBodyRead)
 	assert.Nil(t, got)

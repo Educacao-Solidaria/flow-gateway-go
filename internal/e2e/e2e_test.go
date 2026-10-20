@@ -383,6 +383,10 @@ func TestClientDisconnectCancelsTheUpstream(t *testing.T) {
 	t.Cleanup(llm.Close)
 	sock, _ := semcache(t)
 	e := stack(t, llm.URL, sock, brainRouter(t, "trecho"))
+	// A conexão com o semantic-cache abre antes da contagem: fechá-la no fim
+	// dependeria do AF_UNIX do Windows entregar o fechamento ao fake (no CI, às
+	// vezes não entrega). O STATS volta unsupported do fake, e a conexão fica.
+	_, _ = e.cache.Stats(context.Background())
 	before := runtime.NumGoroutine()
 
 	resp := post(t, e, "oi")
@@ -396,6 +400,5 @@ func TestClientDisconnectCancelsTheUpstream(t *testing.T) {
 		t.Fatal("o upstream não foi cancelado")
 	}
 	e.hc.CloseIdleConnections()
-	_ = e.cache.Close() // o leitor da conexão com o semantic-cache nasceu nesta requisição
 	testutil.NoGoroutineLeak(t, before)
 }

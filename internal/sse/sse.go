@@ -1,7 +1,8 @@
-// Package sse lê o text/event-stream da OpenRouter. Reader separa os eventos
-// como manda a spec do WHATWG (linhas em LF, CRLF ou CR sozinho; comentários;
-// data em várias linhas), com teto por linha; Decode entrega os
-// chat.completion.chunk no contrato de stream do pkg/openrouter.
+// Package sse lê o text/event-stream da OpenRouter e escreve o do gateway.
+// Reader separa os eventos como manda a spec do WHATWG (linhas em LF, CRLF ou
+// CR sozinho; comentários; data em várias linhas), com teto por linha; Decode
+// entrega os chat.completion.chunk no contrato de stream do pkg/openrouter; e
+// Writer (writer.go) manda os eventos ao studio, um Flush por evento.
 package sse
 
 import (

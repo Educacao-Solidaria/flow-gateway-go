@@ -2,12 +2,12 @@
 // do brain-router-py (POST /api/v1/search e /api/v1/index), com os schemas
 // pydantic do app/schemas/mcp.py dele como fonte da verdade.
 //
-// A busca é idempotente e repete em falha transitória (rede, prazo da
-// tentativa, 408, 429 e 5xx), com espera que dobra entre as tentativas. A
-// indexação não repete sozinha: a tentativa que pareceu falhar pode ter
-// indexado, e repetir duplicaria o documento. As duas passam pelo mesmo
-// disjuntor (internal/circuitbreaker): com o brain-router fora, a chamada falha
-// na hora em vez de esgotar prazos.
+// A busca é idempotente e repete em falha transitória (rede, inclusive a
+// conexão que cai no meio da resposta, prazo da tentativa, 408, 429 e 5xx), com
+// espera que dobra entre as tentativas. A indexação não repete sozinha: a
+// tentativa que pareceu falhar pode ter indexado, e repetir duplicaria o
+// documento. As duas passam pelo mesmo disjuntor (internal/circuitbreaker): com
+// o brain-router fora, a chamada falha na hora em vez de esgotar prazos.
 package raghttp
 
 import (
@@ -104,7 +104,7 @@ func (c *Client) HybridSearch(ctx context.Context, query string, topK int, alpha
 			return nil, ctx.Err()
 		case <-t.C:
 		}
-		err = c.attempt(ctx, c.searchTimeout, "/api/v1/search", req, &out) // cortada no meio não preenche out (o Decoder espera o JSON inteiro)
+		err = c.attempt(ctx, c.searchTimeout, "/api/v1/search", req, &out) // a cortada no meio não chega ao Unmarshal: out fica intacto
 	}
 	if err != nil {
 		return nil, err
@@ -176,9 +176,14 @@ func (c *Client) post(ctx context.Context, path string, in, out any) error {
 		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxBody))
 		_ = resp.Body.Close()
 	}()
-	dec := json.NewDecoder(io.LimitReader(resp.Body, maxBody))
+	// O corpo é lido inteiro antes de decodificar, para separar a conexão que
+	// caiu no meio dele (falha de transporte) do JSON inválido.
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxBody))
 	if resp.StatusCode/100 == 2 {
-		if err := dec.Decode(out); err != nil {
+		if err != nil {
+			return fmt.Errorf("%w: %w", errBodyRead, err)
+		}
+		if err := json.Unmarshal(data, out); err != nil {
 			return fmt.Errorf("raghttp: resposta ilegível: %w", err)
 		}
 		return nil
@@ -189,19 +194,24 @@ func (c *Client) post(ctx context.Context, path string, in, out any) error {
 			Message string `json:"message"`
 		} `json:"error"`
 	}
-	if _ = dec.Decode(&env); env.Error.Code == "" { // corpo fora do envelope (ex.: proxy no meio)
+	if _ = json.Unmarshal(data, &env); env.Error.Code == "" { // corpo fora do envelope (ex.: proxy no meio) ou cortado
 		env.Error.Code, env.Error.Message = "http_"+strconv.Itoa(resp.StatusCode), resp.Status
 	}
 	return gwerrors.New(env.Error.Code, "brain-router: "+env.Error.Message, resp.StatusCode, 0)
 }
 
-// retryable: falha de transporte, prazo da tentativa, 408, 429 e 5xx. Circuito
-// aberto, erro do pedido (4xx), resposta ilegível e desistência não repetem.
+// errBodyRead: a leitura do corpo de uma resposta 2xx falhou no meio (quase
+// sempre a conexão que caiu). É falha de transporte, não resposta ilegível.
+var errBodyRead = errors.New("raghttp: a leitura da resposta falhou no meio")
+
+// retryable: falha de transporte (inclusive a resposta cortada no meio), prazo
+// da tentativa, 408, 429 e 5xx. Circuito aberto, erro do pedido (4xx), resposta
+// ilegível e desistência não repetem.
 func retryable(err error) bool {
 	var ue *url.Error
 	var ge *gwerrors.GatewayError
 	switch {
-	case errors.Is(err, gwerrors.ErrUpstreamTimeout), errors.As(err, &ue):
+	case errors.Is(err, gwerrors.ErrUpstreamTimeout), errors.Is(err, errBodyRead), errors.As(err, &ue):
 		return true
 	case errors.As(err, &ge):
 		return ge.HTTPStatus == http.StatusRequestTimeout || ge.HTTPStatus == http.StatusTooManyRequests || ge.HTTPStatus >= 500

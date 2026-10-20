@@ -10,9 +10,11 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -108,4 +110,18 @@ func NewLogger(t testing.TB) (*slog.Logger, *LogBuffer) {
 	log, err := logger.New(buf, "debug", "json")
 	require.NoError(t, err)
 	return log, buf
+}
+
+// NoGoroutineLeak espera as goroutines voltarem a before (o
+// runtime.NumGoroutine() do início do teste) e falha o teste se não voltarem
+// em 10 s. Não há canal para isso: as do transporte HTTP e as de leitura de
+// uma conexão saem sozinhas depois do Close; o prazo só existe para o teste
+// falhar em vez de travar. (O require.Eventually não serve: ele cria uma
+// goroutine própria, e a conta fica sempre uma acima.)
+func NoGoroutineLeak(t testing.TB, before int) {
+	t.Helper()
+	for deadline := time.Now().Add(10 * time.Second); runtime.NumGoroutine() > before && time.Now().Before(deadline); {
+		time.Sleep(10 * time.Millisecond)
+	}
+	assert.LessOrEqual(t, runtime.NumGoroutine(), before, "goroutine sobrando depois do encerramento")
 }

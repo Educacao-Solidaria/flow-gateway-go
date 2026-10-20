@@ -53,17 +53,6 @@ func load(t *testing.T) int {
 	return 1000
 }
 
-// noLeak espera as goroutines voltarem ao número de antes do teste. Não há
-// canal para isso (as do transporte HTTP saem sozinhas depois do Close); o
-// prazo só existe para o teste falhar em vez de travar.
-func noLeak(t *testing.T, before int) {
-	t.Helper()
-	for deadline := time.Now().Add(10 * time.Second); runtime.NumGoroutine() > before && time.Now().Before(deadline); {
-		time.Sleep(10 * time.Millisecond)
-	}
-	assert.LessOrEqual(t, runtime.NumGoroutine(), before, "goroutine sobrando depois do encerramento")
-}
-
 // upstream é o openrouter.Client mínimo que fala HTTP com o mock (o cliente
 // real da OpenRouter ainda não existe). A URL sai do modelo, e status de erro
 // vira GatewayError com ele, que é o que o Fallback classifica.
@@ -263,7 +252,7 @@ func TestPipelineUnderLoad(t *testing.T) {
 	good.Close()
 	bad.Close()
 	hc.CloseIdleConnections()
-	noLeak(t, before)
+	testutil.NoGoroutineLeak(t, before)
 	assert.Empty(t, logs.String(), "nenhum panic nem falha de goroutine supervisionada")
 }
 
@@ -307,7 +296,7 @@ func TestShutdownUnderLoad(t *testing.T) {
 	assert.EqualValues(t, n, accepted.Load()+refused.Load())
 	assert.GreaterOrEqual(t, accepted.Load(), int64(n/2))
 	assert.Equal(t, accepted.Load(), ran.Load(), "toda tarefa aceita rodou, e uma vez só")
-	noLeak(t, before)
+	testutil.NoGoroutineLeak(t, before)
 	assert.Empty(t, logs.String())
 }
 
@@ -375,5 +364,5 @@ func TestSingleflightNeverHandsOverCanceledCall(t *testing.T) {
 		}(i)
 	}
 	wg.Wait()
-	noLeak(t, before)
+	testutil.NoGoroutineLeak(t, before)
 }

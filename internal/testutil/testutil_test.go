@@ -4,8 +4,10 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"runtime"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -74,4 +76,16 @@ func TestNewLoggerCapturesEntries(t *testing.T) {
 	require.Len(t, entries, 10)
 	assert.Equal(t, "abc", entries[0][logger.TraceIDKey])
 	assert.Equal(t, logger.Redacted, entries[0]["api_key"])
+}
+
+func TestNoGoroutineLeakWaitsForTheExit(t *testing.T) {
+	before := runtime.NumGoroutine()
+	exited := make(chan struct{})
+	go func() { time.Sleep(20 * time.Millisecond); close(exited) }()
+	NoGoroutineLeak(t, before) // a goroutine ainda dorme: tem de esperar a saída, não falhar
+	select {
+	case <-exited:
+	default:
+		t.Fatal("voltou com a goroutine ainda viva")
+	}
 }

@@ -43,8 +43,8 @@ func TestLoadDefaults(t *testing.T) {
 	if o := cfg.OpenRouter; o.ResponseHeaderTimeout != 60*time.Second || o.MaxIdleConnsPerHost != 64 || o.MaxConnsPerHost != 0 {
 		t.Errorf("pool do upstream inesperado: %+v", o)
 	}
-	if cfg.Cache.SocketPath != "/tmp/semantic-cache.sock" {
-		t.Errorf("cache.socket_path = %q", cfg.Cache.SocketPath)
+	if cfg.Cache.SocketPath != "/tmp/semantic-cache.sock" || cfg.Cache.SocketOwnerUID != -1 {
+		t.Errorf("cache inesperado: %+v", cfg.Cache)
 	}
 }
 
@@ -52,6 +52,14 @@ func TestCacheSocketPathRequired(t *testing.T) {
 	yaml := writeFile(t, "config.yaml", "cache:\n  socket_path: \"\"\n")
 	if _, err := load(t, "--config", yaml, "--env-file", ""); err == nil || !strings.Contains(err.Error(), "cache.socket_path") {
 		t.Fatalf("esperava erro de cache.socket_path vazio, veio %v", err)
+	}
+	t.Setenv("FLOW_CACHE_SOCKET_OWNER_UID", "-2")
+	if _, err := load(t, "--env-file", ""); err == nil || !strings.Contains(err.Error(), "cache.socket_owner_uid") {
+		t.Fatalf("esperava erro de cache.socket_owner_uid -2, veio %v", err)
+	}
+	t.Setenv("FLOW_CACHE_SOCKET_OWNER_UID", "998") // produção com usuários separados
+	if cfg, err := load(t, "--env-file", ""); err != nil || cfg.Cache.SocketOwnerUID != 998 {
+		t.Fatalf("socket_owner_uid pelo ambiente: %+v, %v", cfg, err)
 	}
 }
 

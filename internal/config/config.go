@@ -72,6 +72,9 @@ type OpenRouterConfig struct {
 type CacheConfig struct {
 	// SocketPath é o Unix domain socket do semantic-cache-rs.
 	SocketPath string `mapstructure:"socket_path"`
+	// SocketOwnerUID é o uid esperado do dono do socket e do processo do cache
+	// ("Segurança do socket" no docs/ipc-v1.md); -1 = o uid do próprio gateway.
+	SocketOwnerUID int `mapstructure:"socket_owner_uid"`
 }
 
 var defaults = map[string]any{
@@ -96,6 +99,7 @@ var defaults = map[string]any{
 	"openrouter.max_idle_conns_per_host": 64, // o padrão do Go é 2: um gateway num host só reabriria conexão o tempo todo
 	"openrouter.max_conns_per_host":      0,
 	"cache.socket_path":                  "/tmp/semantic-cache.sock",
+	"cache.socket_owner_uid":             -1,
 }
 
 // RegisterFlags declara em fs as flags aceitas por Load. Segredos (api_key)
@@ -220,6 +224,9 @@ func (c *Config) Validate() error {
 	}
 	if c.Cache.SocketPath == "" {
 		errs = append(errs, errors.New("cache.socket_path é obrigatório"))
+	}
+	if c.Cache.SocketOwnerUID < -1 {
+		errs = append(errs, errors.New("cache.socket_owner_uid deve ser >= -1 (-1 = o uid do gateway)"))
 	}
 	if c.Env == "production" && c.OpenRouter.APIKey == "" {
 		errs = append(errs, errors.New("openrouter.api_key é obrigatória em production (FLOW_OPENROUTER_API_KEY)"))

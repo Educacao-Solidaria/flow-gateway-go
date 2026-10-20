@@ -59,7 +59,7 @@ func TestContractRoundTrip(t *testing.T) {
 		r := <-next
 		reply(nc, r.Kind, f.RequestID, string(r.Payload))
 	})
-	c := New(path)
+	c := New(path, -1, nil)
 	defer c.Close()
 	ctx := context.Background()
 	_, err := c.Lookup(ctx, "p", []float32{float32(math.NaN())}, 0.9)
@@ -113,7 +113,7 @@ func TestPipelineCancelAndClose(t *testing.T) {
 		}
 		reply(nc, ipc.KindLookupResp, f.RequestID, `{"hit":true,"cached_response":"`+req.Prompt+`"}`)
 	})
-	c := New(path)
+	c := New(path, -1, nil)
 	defer c.Close()
 	lento := func(ctx context.Context) chan error {
 		errc := make(chan error, 1)
@@ -160,7 +160,7 @@ func TestReconnectAndBackoff(t *testing.T) {
 			reply(nc, ipc.KindStatsResp, f.RequestID, `{}`)
 		}
 	})
-	c := New(path + ".nada") // ninguém escutando
+	c := New(path+".nada", -1, nil) // ninguém escutando
 	defer c.Close()
 	c.minBackoff = time.Hour
 	ctx := context.Background()
@@ -194,7 +194,7 @@ func TestStalledServerHitsWriteTimeout(t *testing.T) {
 		reply(nc, ipc.KindStatsResp, f.RequestID, `{}`)
 		<-stall
 	})
-	c := New(path)
+	c := New(path, -1, nil)
 	c.writeTimeout = 50 * time.Millisecond
 	defer c.Close()
 	_, err := c.Stats(ctx)

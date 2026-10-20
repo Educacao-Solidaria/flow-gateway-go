@@ -4,7 +4,9 @@
 // resposta volta a quem a pediu pelo request_id, em qualquer ordem. Conexão
 // que cai é refeita na chamada seguinte; discagem que falha faz as chamadas
 // falharem na hora (ErrUnavailable) até passar o backoff, e o gateway trata o
-// cache como miss em vez de esperar.
+// cache como miss em vez de esperar. Antes de discar, o caminho é conferido
+// (seção "Segurança do socket" do docs/ipc-v1.md), e frame corrompido recebe o
+// ERROR bad_frame do contrato e derruba a conexão.
 package udscache
 
 import (
@@ -13,8 +15,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
+	"os"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Educacao-Solidaria/flow-gateway-go/internal/ipc"
@@ -25,6 +30,9 @@ var (
 	// ErrUnavailable: a discagem falhou agora, ou há pouco e o backoff não passou.
 	ErrUnavailable = errors.New("udscache: semantic-cache indisponível")
 	ErrClosed      = errors.New("udscache: cliente fechado")
+	// ErrUntrustedSocket: o caminho não é socket (arquivo comum, symlink), ou o
+	// socket ou o processo do outro lado é de outro uid. O cache vira miss.
+	ErrUntrustedSocket = errors.New("udscache: socket não confiável")
 )
 
 // ServerError é um frame ERROR; pelo contrato, Message não carrega dado do usuário.
@@ -41,6 +49,9 @@ func (e *ServerError) Error() string { return "udscache: " + e.Code + ": " + e.M
 // servidor parado, e aí a conexão é descartada.
 type Client struct {
 	path                      string
+	uid                       int // dono esperado do socket e do processo do cache
+	log                       *slog.Logger
+	discarded                 atomic.Uint64
 	dialTimeout, writeTimeout time.Duration
 	minBackoff, maxBackoff    time.Duration // a espera dobra a cada discagem que falha
 	readers                   sync.WaitGroup
@@ -55,10 +66,18 @@ type Client struct {
 
 var _ cache.Client = (*Client)(nil)
 
-// New cria o cliente do socket em path (config cache.socket_path). A conexão
-// só é aberta na primeira chamada.
-func New(path string) *Client {
-	return &Client{path: path, dialTimeout: time.Second, writeTimeout: time.Second,
+// New cria o cliente do socket em path (config cache.socket_path); uid é o
+// dono esperado (cache.socket_owner_uid; -1 = o do próprio gateway) e log
+// recebe a recusa de socket não confiável (nil = slog.Default()). A conexão só
+// é aberta na primeira chamada.
+func New(path string, uid int, log *slog.Logger) *Client {
+	if uid < 0 {
+		uid = os.Getuid() // -1 no Windows, que não tem uid: lá o dono não é conferido
+	}
+	if log == nil {
+		log = slog.Default()
+	}
+	return &Client{path: path, uid: uid, log: log, dialTimeout: time.Second, writeTimeout: time.Second,
 		minBackoff: 100 * time.Millisecond, maxBackoff: 5 * time.Second, lock: make(chan struct{}, 1)}
 }
 
@@ -146,8 +165,7 @@ func (c *Client) conn(ctx context.Context) (*conn, error) {
 	}
 	dctx, cancel := context.WithTimeout(ctx, c.dialTimeout)
 	defer cancel()
-	var d net.Dialer
-	nc, err := d.DialContext(dctx, "unix", c.path)
+	nc, err := c.dial(dctx)
 	if err != nil {
 		if ctx.Err() == nil { // desistência de quem discava não é falha do cache
 			c.backoff = min(max(2*c.backoff, c.minBackoff), c.maxBackoff)
@@ -162,6 +180,59 @@ func (c *Client) conn(ctx context.Context) (*conn, error) {
 	return c.cur, nil
 }
 
+// dial confere o caminho, disca e confere o processo do outro lado.
+func (c *Client) dial(ctx context.Context) (net.Conn, error) {
+	err := checkSocket(c.path, c.uid)
+	var nc net.Conn
+	if err == nil {
+		var d net.Dialer
+		if nc, err = d.DialContext(ctx, "unix", c.path); err == nil {
+			if err = checkPeer(nc, c.uid); err != nil {
+				_ = nc.Close()
+			}
+		}
+	}
+	if errors.Is(err, ErrUntrustedSocket) { // o backoff limita a um aviso por espera
+		c.log.Warn("udscache: socket não confiável; o cache fica em miss", "path", c.path, "err", err)
+	}
+	return nc, err
+}
+
+// checkSocket: o caminho tem de ser socket (o Lstat não segue symlink, que
+// também cai aqui) do uid esperado. Caminho que não existe é falha comum.
+func checkSocket(path string, uid int) error {
+	fi, err := os.Lstat(path)
+	switch {
+	case err != nil:
+		return err
+	case fi.Mode().Type() != os.ModeSocket:
+		return fmt.Errorf("%w: %s não é socket (%v)", ErrUntrustedSocket, path, fi.Mode())
+	}
+	if owner, ok := ownerUID(fi); ok && owner != uid {
+		return fmt.Errorf("%w: %s é do uid %d, esperado %d", ErrUntrustedSocket, path, owner, uid)
+	}
+	return nil
+}
+
+// peerCred é o peerUID da plataforma; o teste troca para simular outro uid.
+var peerCred = peerUID
+
+// checkPeer confere o uid do processo do outro lado, onde dá para saber.
+func checkPeer(nc net.Conn, uid int) error {
+	peer, ok, err := peerCred(nc)
+	switch {
+	case err != nil:
+		return fmt.Errorf("%w: SO_PEERCRED: %w", ErrUntrustedSocket, err)
+	case ok && peer != uid:
+		return fmt.Errorf("%w: o processo do outro lado é do uid %d, esperado %d", ErrUntrustedSocket, peer, uid)
+	}
+	return nil
+}
+
+// DiscardedFrames conta os frames recusados pela integridade (magic, versão,
+// flags, crc ou teto): cada um recebe o ERROR do contrato e derruba a conexão.
+func (c *Client) DiscardedFrames() uint64 { return c.discarded.Load() }
+
 // readLoop entrega cada resposta a quem espera pelo request_id dela até a
 // conexão acabar; frame inválido também a encerra (o contrato não ressincroniza).
 func (c *Client) readLoop(cn *conn) {
@@ -170,6 +241,10 @@ func (c *Client) readLoop(cn *conn) {
 	for {
 		f, err := ipc.ReadFrame(r)
 		if err != nil {
+			if fe := (*ipc.FrameError)(nil); errors.As(err, &fe) {
+				c.discarded.Add(1)
+				cn.reject(fe, c.writeTimeout)
+			}
 			cn.close(fmt.Errorf("udscache: conexão com o semantic-cache caiu: %w", err))
 			return
 		}
@@ -237,6 +312,15 @@ func (cn *conn) register(ch chan ipc.Frame) (uint32, error) {
 		}
 	}
 	return 0, cn.err
+}
+
+// reject manda ao servidor o ERROR do contrato para o frame recusado, com o
+// request_id do cabeçalho; melhor esforço: a conexão fecha logo depois.
+func (cn *conn) reject(fe *ipc.FrameError, timeout time.Duration) {
+	payload, _ := json.Marshal(ServerError{Code: fe.Code, Message: fe.Reason})
+	raw, _ := ipc.Append(nil, ipc.Frame{Kind: ipc.KindError, RequestID: fe.RequestID, Payload: payload})
+	_ = cn.nc.SetWriteDeadline(time.Now().Add(timeout))
+	_, _ = cn.nc.Write(raw)
 }
 
 func (cn *conn) dead() bool {

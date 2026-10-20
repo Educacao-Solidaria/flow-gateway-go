@@ -8,7 +8,7 @@
 //
 //	chunks, errs = w.Tee(ctx, prompt, embedding, chunks, errs)
 //
-// e, no main, w := cachewriter.New(udscache.New(cfg.Cache.SocketPath), opts, log)
+// e, no main, w := cachewriter.New(udscache.New(cfg.Cache.SocketPath, cfg.Cache.SocketOwnerUID, log), opts, log)
 // com sup.Go("cachewriter", w.Run), para o Shutdown do supervisor drenar a fila.
 package cachewriter
 

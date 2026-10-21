@@ -42,8 +42,9 @@ func ShuttingDown(ctx context.Context) <-chan struct{} {
 	return ch
 }
 
-// New cria o servidor com as rotas base: /livez (processo vivo) e /healthz
-// (probes das dependências, ver health.Checker). Falha se cfg.TrustedProxies
+// New cria o servidor com as rotas base: /livez (processo vivo), /healthz
+// (probes das dependências, ver health.Checker) e, com credencial em
+// cfg.MetricsUsername/MetricsPassword, /metrics (Prometheus, basic auth). Falha se cfg.TrustedProxies
 // tiver entrada que não seja IP nem CIDR.
 func New(cfg config.ServerConfig, log *slog.Logger, probes ...health.Probe) (*Server, error) {
 	trusted, err := middleware.ParseTrustedProxies(cfg.TrustedProxies)
@@ -59,6 +60,9 @@ func New(cfg config.ServerConfig, log *slog.Logger, probes ...health.Probe) (*Se
 	hc := health.New(log, cfg.HealthTimeout, probes...)
 	r.Get("/livez", hc.Live)
 	r.Get("/healthz", hc.Ready)
+	if cfg.MetricsUsername != "" { // sem credencial a rota não existe: 404
+		r.With(middleware.BasicAuth("flow-gateway metrics", cfg.MetricsUsername, cfg.MetricsPassword)).Get("/metrics", m.ServeHTTP)
+	}
 
 	shuttingDown := make(chan struct{})
 	base := context.WithValue(context.Background(), shuttingDownKey{}, (<-chan struct{})(shuttingDown))

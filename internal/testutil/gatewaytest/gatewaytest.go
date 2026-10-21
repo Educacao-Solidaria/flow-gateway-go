@@ -134,8 +134,8 @@ func (u Upstream) StreamChatCompletion(ctx context.Context, req *domain.ChatComp
 // ServeCache atende o IPC v1 em ln, com c no papel do semantic-cache-rs, até ln
 // fechar: LOOKUP_REQ e STORE_REQ; outro kind recebe ERROR unsupported. Cada
 // frame roda na sua goroutine (o udscache casa a resposta pelo request_id): um
-// frame por vez na conexão única do udscache seria o gargalo da carga, não o
-// gateway (5.000 VUs no CI: 450 ms de fila até no hit).
+// frame por vez, na conexão única do udscache, poria a decodificação de toda a
+// carga numa goroutine só, e o gargalo seria o fake, não o gateway.
 func ServeCache(ln net.Listener, c cache.Client) {
 	for nc, err := ln.Accept(); err == nil; nc, err = ln.Accept() {
 		go func() {

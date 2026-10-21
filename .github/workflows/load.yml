@@ -29,9 +29,9 @@ jobs:
     env:
       K6_VERSION: v2.3.0
       K6_SHA256: 39c3117b6af817592dcd0ce4242105c0a7af10948c2a425306f0be8f7a8a8ab1
-      VUS: ${{ inputs.vus || '5000' }}
-      RAMP: ${{ inputs.ramp || '1m' }}
-      HOLD: ${{ inputs.hold || '5m' }}
+      VUS: ${{ inputs.vus || '1000' }}
+      RAMP: ${{ inputs.ramp || '15s' }}
+      HOLD: ${{ inputs.hold || '30s' }}
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-go@v6

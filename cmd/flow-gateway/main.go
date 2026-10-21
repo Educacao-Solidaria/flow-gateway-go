@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -27,7 +28,8 @@ func main() {
 	}
 }
 
-// run sobe o gateway e bloqueia até ctx ser cancelado (SIGINT/SIGTERM).
+// run sobe o gateway (e o pprof, com server.pprof_enabled) e bloqueia até ctx
+// ser cancelado (SIGINT/SIGTERM).
 func run(ctx context.Context, args []string, stdout io.Writer) error {
 	fs := pflag.NewFlagSet("flow-gateway", pflag.ContinueOnError)
 	fs.SetOutput(io.Discard)
@@ -53,5 +55,16 @@ func run(ctx context.Context, args []string, stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
-	return srv.Run(ctx)
+	admin := server.NewAdmin(cfg.Server, log)
+	if admin == nil {
+		return srv.Run(ctx)
+	}
+	// O pprof roda ao lado: se um dos dois cai (porta ocupada), o outro encerra.
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	adminErr := make(chan error, 1)
+	go func() { adminErr <- admin.Run(ctx); cancel() }()
+	err = srv.Run(ctx)
+	cancel()
+	return errors.Join(err, <-adminErr)
 }

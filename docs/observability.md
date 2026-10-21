@@ -86,3 +86,25 @@ p95 por rota, tokens por segundo e requisições em andamento.
 O `TestDashboard` (`internal/metrics`) confere no CI que toda métrica citada nas
 queries está no texto que o `Gateway` escreve (nome errado não passa), que o
 `uid` é o fixo e que toda fonte é `${DS_PROMETHEUS}`.
+
+## Profiling (pprof)
+
+Desligado por padrão. `server.pprof_enabled=true` (`FLOW_SERVER_PPROF_ENABLED`)
+sobe um listener administrativo próprio em `server.pprof_addr` (padrão
+`127.0.0.1:6060`), nunca no servidor público. Fora do loopback (`0.0.0.0`,
+IP da rede, nome), a config exige a basic auth do `/metrics`; com ela
+configurada, o pprof pede a mesma credencial em qualquer endereço.
+
+Rotas: `/debug/pprof/` (índice e perfis nomeados: `heap`, `goroutine`,
+`allocs`, `block`, `mutex`, `threadcreate`), `/debug/pprof/profile?seconds=N`
+(CPU, 30 s por padrão) e `/debug/pprof/trace?seconds=N`. Ficam de fora o
+`cmdline` (os.Args) e o `/debug/vars` (expvar). O `net/http/pprof` registra as
+rotas no `http.DefaultServeMux` no init (e o `chi/middleware` já o importa);
+nenhum servidor do gateway serve o `DefaultServeMux`, e o `TestPublicServerHasNoPprof`
+prova que o público responde 404 nelas. `block` e `mutex` só têm amostra com
+`runtime.SetBlockProfileRate`/`SetMutexProfileFraction`, que o gateway não liga.
+
+```sh
+go tool pprof http://127.0.0.1:6060/debug/pprof/heap
+curl -o cpu.pprof 'http://127.0.0.1:6060/debug/pprof/profile?seconds=30'
+```

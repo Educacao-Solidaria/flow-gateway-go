@@ -67,6 +67,27 @@ func TestMetricsCredentials(t *testing.T) {
 	}
 }
 
+func TestPprofConfig(t *testing.T) {
+	cfg, err := load(t, "--env-file", "")
+	if err != nil || cfg.Server.PprofEnabled || cfg.Server.PprofAddr != "127.0.0.1:6060" {
+		t.Fatalf("o pprof nasce desligado e em 127.0.0.1:6060: %+v %v", cfg.Server, err)
+	}
+	t.Setenv("FLOW_SERVER_PPROF_ENABLED", "true")
+	for addr, ok := range map[string]bool{"127.0.0.1:6060": true, "[::1]:6060": true, ":6060": false,
+		"0.0.0.0:6060": false, "localhost:6060": false, "10.0.0.5:6060": false, "sem-porta": false} {
+		t.Setenv("FLOW_SERVER_PPROF_ADDR", addr)
+		if _, err := load(t, "--env-file", ""); (err == nil) != ok {
+			t.Errorf("%s: erro %v", addr, err)
+		}
+	}
+	t.Setenv("FLOW_SERVER_PPROF_ADDR", "0.0.0.0:6060")
+	t.Setenv("FLOW_SERVER_METRICS_USERNAME", "prom")
+	t.Setenv("FLOW_SERVER_METRICS_PASSWORD", "s3gredo-bem-longo")
+	if _, err := load(t, "--env-file", ""); err != nil {
+		t.Fatalf("fora do loopback com a basic auth: %v", err)
+	}
+}
+
 func TestCacheSocketPathRequired(t *testing.T) {
 	yaml := writeFile(t, "config.yaml", "cache:\n  socket_path: \"\"\n")
 	if _, err := load(t, "--config", yaml, "--env-file", ""); err == nil || !strings.Contains(err.Error(), "cache.socket_path") {

@@ -47,6 +47,31 @@ func TestRunStartsAndShutsDown(t *testing.T) {
 	}
 }
 
+func TestRunWithPprof(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	t.Setenv("FLOW_SERVER_PPROF_ENABLED", "true")
+	t.Setenv("FLOW_SERVER_PPROF_ADDR", "127.0.0.1:0")
+	var out bytes.Buffer
+	if err := run(ctx, []string{"--env-file", "", "--server.addr", "127.0.0.1:0"}, &out); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if n := strings.Count(out.String(), `"msg":"servidor encerrado"`); n != 2 {
+		t.Errorf("os dois servidores deveriam subir e encerrar, %d encerraram: %s", n, out.String())
+	}
+}
+
+// TestRunPprofListenError: o admin que não sobe derruba o público (ctx sem
+// cancelamento: sem isso o teste pendura) e o erro chega a quem chamou.
+func TestRunPprofListenError(t *testing.T) {
+	t.Setenv("FLOW_SERVER_PPROF_ENABLED", "true")
+	t.Setenv("FLOW_SERVER_PPROF_ADDR", "127.0.0.1:99999")
+	err := run(context.Background(), []string{"--env-file", "", "--server.addr", "127.0.0.1:0"}, io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "listen 127.0.0.1:99999") {
+		t.Fatalf("esperava o erro de listen do pprof, veio %v", err)
+	}
+}
+
 func TestRunListenError(t *testing.T) {
 	err := run(context.Background(), []string{"--env-file", "", "--server.addr", "256.0.0.1:1"}, io.Discard)
 	if err == nil || !strings.Contains(err.Error(), "listen") {

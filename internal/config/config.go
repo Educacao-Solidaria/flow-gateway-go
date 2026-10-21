@@ -10,6 +10,8 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"net"
+	"net/netip"
 	"net/url"
 	"os"
 	"strings"
@@ -49,6 +51,11 @@ type ServerConfig struct {
 	// os dois vazios desligam a rota (404).
 	MetricsUsername string `mapstructure:"metrics_username"`
 	MetricsPassword string `mapstructure:"metrics_password"`
+	// PprofEnabled liga o /debug/pprof num listener administrativo próprio, em
+	// PprofAddr (padrão 127.0.0.1:6060), nunca no público. Fora do loopback,
+	// exige a basic auth do /metrics, que então o protege também.
+	PprofEnabled bool   `mapstructure:"pprof_enabled"`
+	PprofAddr    string `mapstructure:"pprof_addr"`
 }
 
 // LogConfig configura o logger estruturado.
@@ -92,6 +99,8 @@ var defaults = map[string]any{
 	"server.health_timeout":   2 * time.Second,
 	"server.metrics_username": "",
 	"server.metrics_password": "",
+	"server.pprof_enabled":    false,
+	"server.pprof_addr":       "127.0.0.1:6060",
 	"log.level":               "info",
 	"log.format":              "json",
 	"openrouter.base_url":     "https://openrouter.ai/api/v1",
@@ -217,6 +226,16 @@ func (c *Config) Validate() error {
 	}
 	if strings.Contains(c.Server.MetricsUsername, ":") {
 		errs = append(errs, errors.New("server.metrics_username não pode ter ':' (RFC 7617)"))
+	}
+	if c.Server.PprofEnabled {
+		host, _, err := net.SplitHostPort(c.Server.PprofAddr)
+		ip, ipErr := netip.ParseAddr(host)
+		switch {
+		case err != nil:
+			errs = append(errs, fmt.Errorf("server.pprof_addr %q inválido: %w", c.Server.PprofAddr, err))
+		case c.Server.MetricsUsername == "" && (ipErr != nil || !ip.IsLoopback()):
+			errs = append(errs, fmt.Errorf("server.pprof_addr %q fora do loopback (use 127.0.0.1 ou ::1) exige server.metrics_username e server.metrics_password", c.Server.PprofAddr))
+		}
 	}
 	switch c.Log.Level {
 	case "debug", "info", "warn", "error":

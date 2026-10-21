@@ -24,6 +24,7 @@ import (
 // Server é o servidor HTTP do gateway.
 type Server struct {
 	http            *http.Server
+	router          *chi.Mux
 	log             *slog.Logger
 	metrics         *metrics.Gateway
 	shutdownTimeout time.Duration
@@ -77,6 +78,7 @@ func New(cfg config.ServerConfig, log *slog.Logger, probes ...health.Probe) (*Se
 			ErrorLog:          slog.NewLogLogger(log.Handler(), slog.LevelError),
 			BaseContext:       func(net.Listener) context.Context { return base },
 		},
+		router:          r,
 		log:             log,
 		metrics:         m,
 		shutdownTimeout: cfg.ShutdownTimeout,
@@ -87,6 +89,11 @@ func New(cfg config.ServerConfig, log *slog.Logger, probes ...health.Probe) (*Se
 // Metrics devolve as métricas do servidor: o middleware HTTP já as alimenta; a
 // rota de LLM alimenta TTFT, resultado, tokens e cache pelos ganchos do Gateway.
 func (s *Server) Metrics() *metrics.Gateway { return s.metrics }
+
+// Handle monta h em method e pattern (padrão de rota do chi), atrás de todos os
+// middlewares do servidor. Chame antes do Run/Serve: a árvore de rotas do chi
+// não tem trava, e rota nova com o servidor atendendo é corrida de dados.
+func (s *Server) Handle(method, pattern string, h http.Handler) { s.router.Method(method, pattern, h) }
 
 // Run escuta em cfg.Addr e serve até ctx ser cancelado (ver Serve).
 func (s *Server) Run(ctx context.Context) error {

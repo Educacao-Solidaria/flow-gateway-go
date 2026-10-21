@@ -18,7 +18,7 @@ import (
 // A Route fica atrás do servidor de verdade: o miss passa pelo upstream e vai
 // para o cache, o prefixo de hit sai do cache, o /metrics conta a rota pelo
 // template. Falha na subida (até na última etapa, escutar no endereço do
-// gateway) desfaz o que já subiu, e o Close não deixa goroutine.
+// gateway) desfaz o que já subiu; o Close devolve o erro do servidor e não deixa goroutine.
 func TestStartAndClose(t *testing.T) {
 	before := runtime.NumGoroutine()
 	log, _ := testutil.NewLogger(t)
@@ -63,6 +63,13 @@ func TestStartAndClose(t *testing.T) {
 
 	hc.CloseIdleConnections()
 	require.NoError(t, st.Close())
+	cfg.Server.ShutdownTimeout = time.Nanosecond // stream em curso além do prazo: o Close espera o servidor e devolve o erro (o alvo da carga sai 1)
+	st, err = Start(cfg, Fakes{Chunks: 2, Gap: time.Hour}, log)
+	require.NoError(t, err)
+	resp, err := hc.Post(st.URL+"/v1/chat/completions", "application/json", strings.NewReader(`{"model":"m","messages":[{"role":"user","content":"oi"}]}`))
+	require.NoError(t, err) // o cabeçalho sai com o 1º pedaço; o 2º só viria em 1 h
+	require.ErrorContains(t, st.Close(), "server: shutdown")
+	_ = resp.Body.Close()
 	if runtime.GOOS != "windows" { // lá o AF_UNIX às vezes não entrega ao fake o fechamento da conexão (CI do PR 73)
 		testutil.NoGoroutineLeak(t, before)
 	}

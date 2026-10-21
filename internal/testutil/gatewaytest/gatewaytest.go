@@ -132,36 +132,38 @@ func (u Upstream) StreamChatCompletion(ctx context.Context, req *domain.ChatComp
 }
 
 // ServeCache atende o IPC v1 em ln, com c no papel do semantic-cache-rs, até ln
-// fechar: LOOKUP_REQ e STORE_REQ, um frame por vez em cada conexão; outro kind
-// recebe ERROR unsupported.
+// fechar: LOOKUP_REQ e STORE_REQ; outro kind recebe ERROR unsupported. Cada
+// frame roda na sua goroutine (o udscache casa a resposta pelo request_id): um
+// frame por vez na conexão única do udscache seria o gargalo da carga, não o
+// gateway (5.000 VUs no CI: 450 ms de fila até no hit).
 func ServeCache(ln net.Listener, c cache.Client) {
 	for nc, err := ln.Accept(); err == nil; nc, err = ln.Accept() {
 		go func() {
 			defer nc.Close()
 			r := bufio.NewReader(nc)
 			for f, err := ipc.ReadFrame(r); err == nil; f, err = ipc.ReadFrame(r) {
-				var req struct {
-					Prompt, Response string
-					Embedding        []float32
-					Threshold        float32
-					TTL              int `json:"ttl_seconds"`
-				}
-				_ = json.Unmarshal(f.Payload, &req)
-				var out any = struct{}{}
-				kind, ctx := f.Kind+1, context.Background()
-				switch f.Kind {
-				case ipc.KindLookupReq:
-					out, _ = c.Lookup(ctx, req.Prompt, req.Embedding, req.Threshold)
-				case ipc.KindStoreReq:
-					_ = c.Store(ctx, req.Prompt, req.Response, req.Embedding, req.TTL)
-				default:
-					kind, out = ipc.KindError, udscache.ServerError{Code: ipc.CodeUnsupported, Message: "kind"}
-				}
-				payload, _ := json.Marshal(out)
-				raw, _ := ipc.Append(nil, ipc.Frame{Kind: kind, RequestID: f.RequestID, Payload: payload})
-				if _, err := nc.Write(raw); err != nil {
-					return
-				}
+				go func() {
+					var req struct {
+						Prompt, Response string
+						Embedding        []float32
+						Threshold        float32
+						TTL              int `json:"ttl_seconds"`
+					}
+					_ = json.Unmarshal(f.Payload, &req)
+					var out any = struct{}{}
+					kind, ctx := f.Kind+1, context.Background()
+					switch f.Kind {
+					case ipc.KindLookupReq:
+						out, _ = c.Lookup(ctx, req.Prompt, req.Embedding, req.Threshold)
+					case ipc.KindStoreReq:
+						_ = c.Store(ctx, req.Prompt, req.Response, req.Embedding, req.TTL)
+					default:
+						kind, out = ipc.KindError, udscache.ServerError{Code: ipc.CodeUnsupported, Message: "kind"}
+					}
+					payload, _ := json.Marshal(out)
+					raw, _ := ipc.Append(nil, ipc.Frame{Kind: kind, RequestID: f.RequestID, Payload: payload})
+					_, _ = nc.Write(raw) // um Write por frame: o net.Conn não intercala Writes concorrentes; com a conexão caída, a leitura também acaba
+				}()
 			}
 		}()
 	}

@@ -32,9 +32,10 @@ export const options = {
     'checks{scenario:chat}': ['rate>0.99'],
     'checks{scenario:probe}': ['rate==1'],
     // TTFB = o 1º pedaço (o sse.Writer manda o cabeçalho com ele), o TTFT visto
-    // pelo cliente; 0,8 s é o SLA do contrato. O stream do fake padrão dura ~4 s.
+    // pelo cliente; 0,8 s é o SLA do contrato. O stream do fake padrão dura ~10 s:
+    // com 4 s, 5.000 VUs davam 1.200 req/s e saturavam os 4 vCPU do runner do CI.
     'http_req_waiting{cache:miss}': ['p(95)<800'],
-    'http_req_duration{cache:miss}': ['p(95)<5000'],
+    'http_req_duration{cache:miss}': ['p(95)<12000'],
     'http_req_duration{cache:hit}': ['p(95)<500'],
     'http_reqs{scenario:chat}': ['count>0'],
     gateway_in_flight: [`max>=${Math.floor(VUS * 0.9)}`],

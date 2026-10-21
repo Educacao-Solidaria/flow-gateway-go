@@ -1,7 +1,7 @@
 // Command load é o alvo da carga do k6 (chat.js, nesta pasta): o gateway sobre
 // os fakes do internal/testutil/gatewaytest, de pé até SIGINT/SIGTERM. A
 // configuração é a do gateway (flags, FLOW_*, .env); a OpenRouter de mentira se
-// regula por --ttft, --gap e --chunks (o padrão: um stream de ~4 s).
+// regula por --ttft, --gap e --chunks (o padrão: um stream de ~10 s).
 package main
 
 import (
@@ -31,7 +31,7 @@ func run(args []string) error {
 	config.RegisterFlags(fs)
 	var f gatewaytest.Fakes
 	fs.DurationVar(&f.TTFT, "ttft", 250*time.Millisecond, "espera da OpenRouter de mentira até o 1º pedaço")
-	fs.DurationVar(&f.Gap, "gap", 200*time.Millisecond, "intervalo entre os pedaços seguintes")
+	fs.DurationVar(&f.Gap, "gap", 500*time.Millisecond, "intervalo entre os pedaços seguintes")
 	fs.IntVar(&f.Chunks, "chunks", 20, "pedaços por resposta")
 	if err := fs.Parse(args); err != nil {
 		return err

@@ -1,8 +1,8 @@
 // Package metrics mede as requisições sem trava: a latência num histograma de
 // contadores sync/atomic, a latência acumulada e um gauge de requisições
-// ativas, mais o middleware HTTP que os alimenta. Não há formato de exposição
-// nem rótulo (status, rota) de propósito: a Fase 4 traz o OpenTelemetry, que
-// lê o Snapshot e põe os atributos.
+// ativas, mais o middleware HTTP que os alimenta. Gateway (prometheus.go) põe
+// os rótulos do contrato da Fase 4 por cima disso e escreve o formato texto do
+// Prometheus (docs/observability.md).
 package metrics
 
 import (
@@ -12,11 +12,12 @@ import (
 )
 
 // bounds são os limites superiores (inclusivos) dos buckets, do milissegundo de
-// um healthcheck aos minutos de um stream de LLM.
+// um healthcheck aos minutos de um stream de LLM. Contêm os buckets do
+// Prometheus (promBuckets), inclusive os 800 ms do SLA de TTFT.
 var bounds = [...]time.Duration{
 	time.Millisecond, 5 * time.Millisecond, 10 * time.Millisecond, 25 * time.Millisecond,
 	50 * time.Millisecond, 100 * time.Millisecond, 250 * time.Millisecond, 500 * time.Millisecond,
-	time.Second, 2500 * time.Millisecond, 5 * time.Second, 10 * time.Second,
+	800 * time.Millisecond, time.Second, 2500 * time.Millisecond, 5 * time.Second, 10 * time.Second,
 	30 * time.Second, time.Minute, 2 * time.Minute, 5 * time.Minute,
 }
 

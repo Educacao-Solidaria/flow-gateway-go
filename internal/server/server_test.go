@@ -86,6 +86,42 @@ func TestMetricsMounted(t *testing.T) {
 	}
 }
 
+func TestMetricsEndpoint(t *testing.T) {
+	const pass = "s3gredo-bem-longo"
+	log, logs := testutil.NewLogger(t)
+	s, err := New(config.ServerConfig{Addr: "127.0.0.1:0", ReadTimeout: time.Second, ShutdownTimeout: time.Second,
+		HealthTimeout: time.Second, MetricsUsername: "prom", MetricsPassword: pass}, log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	get := func(s *Server, user, pass string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+		if user != "" {
+			req.SetBasicAuth(user, pass)
+		}
+		rec := httptest.NewRecorder()
+		s.http.Handler.ServeHTTP(rec, req)
+		return rec
+	}
+	for _, rec := range []*httptest.ResponseRecorder{get(s, "", ""), get(s, "prom", "errada")} {
+		if rec.Code != http.StatusUnauthorized || rec.Header().Get("WWW-Authenticate") == "" {
+			t.Fatalf("sem credencial certa: %d %q", rec.Code, rec.Header())
+		}
+	}
+	rec := get(s, "prom", pass)
+	if rec.Code != http.StatusOK || rec.Header().Get("Content-Type") != "text/plain; version=0.0.4; charset=utf-8" ||
+		!strings.Contains(rec.Body.String(), `flow_gateway_http_requests_total{route="/metrics",method="GET",code="401"} 2`) {
+		t.Fatalf("raspagem: %d %q\n%s", rec.Code, rec.Header(), rec.Body)
+	}
+	if strings.Contains(logs.String(), "s3gredo") || strings.Contains(logs.String(), "cHJvbTpz") { // base64 de "prom:s"
+		t.Fatalf("credencial no log:\n%s", logs)
+	}
+	off, _ := newServer(t, time.Second) // sem credencial configurada
+	if rec := get(off, "prom", pass); rec.Code != http.StatusNotFound {
+		t.Fatalf("sem credencial configurada o /metrics deveria ser 404, veio %d", rec.Code)
+	}
+}
+
 func TestRequestLogCarriesTraceID(t *testing.T) {
 	s, logs := newServer(t, time.Second)
 	rec := httptest.NewRecorder()

@@ -223,6 +223,12 @@ func (g *Gateway) WriteText(w io.Writer) error {
 	return err
 }
 
+// ServeHTTP responde o WriteText com o content-type do formato texto 0.0.4.
+func (g *Gateway) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+	_ = g.WriteText(w) // cliente que caiu no meio não tem a quem avisar
+}
+
 func family(b *bytes.Buffer, name, typ, help string) string {
 	fmt.Fprintf(b, "# HELP %s %s\n# TYPE %s %s\n", name, help, name, typ)
 	return name

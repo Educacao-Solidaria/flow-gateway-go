@@ -9,6 +9,30 @@ Formato texto 0.0.4, escrito por `internal/metrics.Gateway.WriteText`. O
 `server.New` cria o `Gateway` e monta o middleware HTTP; `Server.Metrics()` o
 entrega a quem monta a rota de LLM.
 
+### Exposição: `GET /metrics`
+
+No servidor principal, com basic auth. As credenciais vêm só de config ou env,
+sem padrão embutido e nunca por flag: `server.metrics_username` e
+`server.metrics_password` (`FLOW_SERVER_METRICS_USERNAME` e
+`FLOW_SERVER_METRICS_PASSWORD`, no ambiente, no `.env` ou no YAML). Sem as duas,
+a rota não existe (404); só uma, ou usuário com `:`, é erro de config.
+Credencial errada ou ausente: 401 com `WWW-Authenticate: Basic realm="flow-gateway
+metrics", charset="UTF-8"`. A comparação é em tempo constante e nada da
+credencial vai para log (o log de acesso tem path e status, nunca o header). O
+basic auth manda a senha só em base64: raspe por TLS ou pela rede interna.
+
+```yaml
+scrape_configs:
+  - job_name: flow-gateway
+    basic_auth:
+      username: prometheus
+      password_file: /etc/prometheus/flow-gateway.senha
+    static_configs:
+      - targets: ["flow-gateway:8080"]
+```
+
+### As métricas
+
 | Métrica | Tipo | Labels | Quem alimenta |
 |---|---|---|---|
 | `flow_gateway_http_requests_total` | counter | route, method, code | `Gateway.Middleware` (toda rota do servidor) |

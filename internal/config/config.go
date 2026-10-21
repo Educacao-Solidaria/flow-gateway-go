@@ -44,6 +44,11 @@ type ServerConfig struct {
 	// nenhum é aceito. No ambiente, separados por vírgula
 	// (FLOW_SERVER_TRUSTED_PROXIES).
 	TrustedProxies []string `mapstructure:"trusted_proxies"`
+	// MetricsUsername e MetricsPassword são a basic auth do GET /metrics. Sem
+	// padrão nem flag (FLOW_SERVER_METRICS_USERNAME/_PASSWORD, .env ou YAML);
+	// os dois vazios desligam a rota (404).
+	MetricsUsername string `mapstructure:"metrics_username"`
+	MetricsPassword string `mapstructure:"metrics_password"`
 }
 
 // LogConfig configura o logger estruturado.
@@ -85,6 +90,8 @@ var defaults = map[string]any{
 	"server.shutdown_timeout": 15 * time.Second,
 	"server.trusted_proxies":  []string{},
 	"server.health_timeout":   2 * time.Second,
+	"server.metrics_username": "",
+	"server.metrics_password": "",
 	"log.level":               "info",
 	"log.format":              "json",
 	"openrouter.base_url":     "https://openrouter.ai/api/v1",
@@ -204,6 +211,12 @@ func (c *Config) Validate() error {
 	}
 	if c.Server.WriteTimeout < 0 {
 		errs = append(errs, errors.New("server.write_timeout não pode ser negativo"))
+	}
+	if (c.Server.MetricsUsername == "") != (c.Server.MetricsPassword == "") {
+		errs = append(errs, errors.New("server.metrics_username e server.metrics_password vêm juntos (os dois vazios desligam o /metrics)"))
+	}
+	if strings.Contains(c.Server.MetricsUsername, ":") {
+		errs = append(errs, errors.New("server.metrics_username não pode ter ':' (RFC 7617)"))
 	}
 	switch c.Log.Level {
 	case "debug", "info", "warn", "error":

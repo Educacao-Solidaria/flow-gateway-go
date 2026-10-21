@@ -48,6 +48,25 @@ func TestLoadDefaults(t *testing.T) {
 	}
 }
 
+func TestMetricsCredentials(t *testing.T) {
+	if cfg, err := load(t, "--env-file", ""); err != nil || cfg.Server.MetricsUsername != "" || cfg.Server.MetricsPassword != "" {
+		t.Fatalf("sem padrão embutido: %+v %v", cfg, err)
+	}
+	t.Setenv("FLOW_SERVER_METRICS_USERNAME", "prom")
+	if _, err := load(t, "--env-file", ""); err == nil || !strings.Contains(err.Error(), "server.metrics_password") {
+		t.Fatalf("só o usuário deveria falhar, veio %v", err)
+	}
+	t.Setenv("FLOW_SERVER_METRICS_PASSWORD", "s3gredo-bem-longo")
+	cfg, err := load(t, "--env-file", "")
+	if err != nil || cfg.Server.MetricsUsername != "prom" || cfg.Server.MetricsPassword != "s3gredo-bem-longo" {
+		t.Fatalf("credencial do ambiente: %v", err)
+	}
+	t.Setenv("FLOW_SERVER_METRICS_USERNAME", "pr:om")
+	if _, err := load(t, "--env-file", ""); err == nil || !strings.Contains(err.Error(), "':'") || strings.Contains(err.Error(), "s3gredo") {
+		t.Fatalf("usuário com ':' deveria falhar sem ecoar a senha, veio %v", err)
+	}
+}
+
 func TestCacheSocketPathRequired(t *testing.T) {
 	yaml := writeFile(t, "config.yaml", "cache:\n  socket_path: \"\"\n")
 	if _, err := load(t, "--config", yaml, "--env-file", ""); err == nil || !strings.Contains(err.Error(), "cache.socket_path") {

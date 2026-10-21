@@ -70,3 +70,19 @@ tráfego, `_sum` pode estar algumas observações à frente de `_count` (dentro 
 histograma os buckets são coerentes e `+Inf` é o `_count`). Não há `go_*` nem
 `process_*`: viriam com o `prometheus/client_golang`, que não entrou (motivo no
 PR 77).
+
+## Dashboard (Grafana)
+
+`deploy/grafana/flow-gateway.json`, com `uid` fixo `flow-gateway`. A fonte de
+dados é a variável `DS_PROMETHEUS` (tipo datasource, Prometheus): todo painel e
+toda query usam `${DS_PROMETHEUS}`, então o mesmo JSON entra pelo *Import* da
+interface ou por provisionamento de arquivo, sem editar uid de fonte.
+
+Painéis: TTFT p50/p95/p99 (com a linha do SLA de 0,8 s), requisições por
+segundo por rota, taxa de cache hit, erros HTTP por código (4xx e 5xx), modelos
+mais usados (top 10 no período), chamadas ao LLM por resultado, latência HTTP
+p95 por rota, tokens por segundo e requisições em andamento.
+
+O `TestDashboard` (`internal/metrics`) confere no CI que toda métrica citada nas
+queries está no texto que o `Gateway` escreve (nome errado não passa), que o
+`uid` é o fixo e que toda fonte é `${DS_PROMETHEUS}`.

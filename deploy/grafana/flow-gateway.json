@@ -1,0 +1,166 @@
+{
+  "uid": "flow-gateway",
+  "title": "flow-gateway",
+  "description": "Gateway de LLM: TTFT, tráfego HTTP, modelos, cache e erros. Métricas em docs/observability.md.",
+  "tags": ["flow-gateway", "fase-4"],
+  "editable": true,
+  "graphTooltip": 1,
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": { "from": "now-6h", "to": "now" },
+  "annotations": { "list": [] },
+  "templating": {
+    "list": [
+      {
+        "name": "DS_PROMETHEUS",
+        "label": "Prometheus",
+        "type": "datasource",
+        "query": "prometheus",
+        "current": {},
+        "hide": 0,
+        "refresh": 1,
+        "regex": "",
+        "options": []
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "TTFT p50 / p95 / p99",
+      "description": "Tempo até o primeiro token, todos os modelos. A linha vermelha é o SLA de 0,8 s.",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": { "thresholdsStyle": { "mode": "line" } },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 0.8 }] }
+        },
+        "overrides": []
+      },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+      "targets": [
+        { "refId": "A", "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "legendFormat": "p50",
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(flow_gateway_llm_ttft_seconds_bucket[$__rate_interval])))" },
+        { "refId": "B", "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "legendFormat": "p95",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(flow_gateway_llm_ttft_seconds_bucket[$__rate_interval])))" },
+        { "refId": "C", "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "legendFormat": "p99",
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(flow_gateway_llm_ttft_seconds_bucket[$__rate_interval])))" }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Requisições por segundo, por rota",
+      "description": "route é o template do chi; unmatched = nenhuma rota casou.",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+      "targets": [
+        { "refId": "A", "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "legendFormat": "{{route}}",
+          "expr": "sum by (route) (rate(flow_gateway_http_requests_total[$__rate_interval]))" }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Taxa de cache hit",
+      "description": "Fração das consultas ao semantic-cache que acertaram; erro conta como não acerto.",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1 }, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "single" } },
+      "targets": [
+        { "refId": "A", "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "legendFormat": "hit",
+          "expr": "sum(rate(flow_gateway_cache_lookups_total{result=\"hit\"}[$__rate_interval])) / sum(rate(flow_gateway_cache_lookups_total[$__rate_interval]))" }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Erros HTTP por código",
+      "description": "Respostas 4xx e 5xx por segundo, por status.",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+      "targets": [
+        { "refId": "A", "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "legendFormat": "{{code}}",
+          "expr": "sum by (code) (rate(flow_gateway_http_requests_total{code=~\"[45]..\"}[$__rate_interval]))" }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "bargauge",
+      "title": "Modelos mais usados",
+      "description": "Top 10 por chamadas ao LLM no período do painel; other = além do teto de 50 modelos.",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "options": { "orientation": "horizontal", "displayMode": "gradient", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
+      "targets": [
+        { "refId": "A", "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "legendFormat": "{{model}}", "instant": true,
+          "expr": "topk(10, sum by (model) (increase(flow_gateway_llm_requests_total[$__range])))" }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Chamadas ao LLM por resultado",
+      "description": "ok, error, timeout e canceled (o cliente desistiu) por segundo.",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+      "targets": [
+        { "refId": "A", "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "legendFormat": "{{outcome}}",
+          "expr": "sum by (outcome) (rate(flow_gateway_llm_requests_total[$__rate_interval]))" }
+      ]
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Latência HTTP p95 por rota",
+      "description": "Duração da requisição inteira (num stream SSE, até o fim do stream).",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 24 },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+      "targets": [
+        { "refId": "A", "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "legendFormat": "{{route}}",
+          "expr": "histogram_quantile(0.95, sum by (le, route) (rate(flow_gateway_http_request_duration_seconds_bucket[$__rate_interval])))" }
+      ]
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Tokens por segundo",
+      "description": "Throughput do LLM: input (prompt) e output (completion).",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 8, "w": 8, "x": 12, "y": 24 },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+      "targets": [
+        { "refId": "A", "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "legendFormat": "{{direction}}",
+          "expr": "sum by (direction) (rate(flow_gateway_llm_tokens_total[$__rate_interval]))" }
+      ]
+    },
+    {
+      "id": 9,
+      "type": "stat",
+      "title": "Requisições em andamento",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 8, "w": 4, "x": 20, "y": 24 },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
+      "targets": [
+        { "refId": "A", "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+          "expr": "sum(flow_gateway_http_requests_in_flight)" }
+      ]
+    }
+  ]
+}

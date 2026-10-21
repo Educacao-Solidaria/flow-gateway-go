@@ -207,7 +207,7 @@ func TestTraceparentJoinsRequestLog(t *testing.T) {
 
 func TestRecoverer(t *testing.T) {
 	s, logs := newServer(t, time.Second)
-	s.http.Handler.(*chi.Mux).Get("/panic", func(http.ResponseWriter, *http.Request) { panic("boom") })
+	s.Handle(http.MethodGet, "/panic", http.HandlerFunc(func(http.ResponseWriter, *http.Request) { panic("boom") }))
 	rec := httptest.NewRecorder()
 	s.http.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/panic", nil))
 

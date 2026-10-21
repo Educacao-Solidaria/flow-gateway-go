@@ -4,5 +4,7 @@
 // retry e fallback (resilience) lido pelo sse-reader (sse.Decode), o
 // cachewriter no meio do stream e o sse-writer até o cliente — contra fakes da
 // OpenRouter (openroutertest), do semantic-cache (o cache em memória do
-// pkg/client/cache atrás do IPC v1) e do brain-router. Só tem testes.
+// pkg/client/cache atrás do IPC v1) e do brain-router. Só tem testes: a
+// composição (gatewaytest.Route) e os fakes ficam no internal/testutil/gatewaytest,
+// que a carga do k6 (test/load) também usa.
 package e2e

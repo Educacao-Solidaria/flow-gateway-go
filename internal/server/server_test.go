@@ -122,6 +122,59 @@ func TestMetricsEndpoint(t *testing.T) {
 	}
 }
 
+// TestPublicServerHasNoPprof prova a premissa (o init do net/http/pprof, que
+// o chi/middleware importa, registrou no DefaultServeMux) e que o servidor
+// público não a herda: ele serve o próprio roteador.
+func TestPublicServerHasNoPprof(t *testing.T) {
+	if _, pattern := http.DefaultServeMux.Handler(httptest.NewRequest(http.MethodGet, "/debug/pprof/", nil)); pattern == "" {
+		t.Fatal("premissa: o pprof deveria estar no DefaultServeMux")
+	}
+	s, _ := newServer(t, time.Second)
+	for _, path := range []string{"/debug/pprof/", "/debug/pprof/heap", "/debug/pprof/cmdline", "/debug/vars"} {
+		rec := httptest.NewRecorder()
+		s.http.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+		if rec.Code != http.StatusNotFound {
+			t.Errorf("%s no servidor público: %d", path, rec.Code)
+		}
+	}
+}
+
+func TestAdmin(t *testing.T) {
+	log, _ := testutil.NewLogger(t)
+	cfg := config.ServerConfig{ReadTimeout: time.Second, ShutdownTimeout: time.Second, PprofAddr: "127.0.0.1:0"}
+	if NewAdmin(cfg, log) != nil {
+		t.Fatal("sem pprof_enabled o admin não existe")
+	}
+	cfg.PprofEnabled = true
+	open := NewAdmin(cfg, log)
+	cfg.MetricsUsername, cfg.MetricsPassword = "prom", "s3gredo-bem-longo"
+	locked := NewAdmin(cfg, log)
+	for _, tc := range []struct {
+		s    *Server
+		path string
+		auth bool
+		want int
+	}{
+		{open, "/debug/pprof/", false, http.StatusOK},
+		{open, "/debug/pprof/goroutine?debug=1", false, http.StatusOK},
+		{open, "/debug/pprof/cmdline", false, http.StatusNotFound}, // os.Args fica de fora
+		{open, "/debug/vars", false, http.StatusNotFound},
+		{open, "/metrics", false, http.StatusNotFound},
+		{locked, "/debug/pprof/heap", false, http.StatusUnauthorized},
+		{locked, "/debug/pprof/heap", true, http.StatusOK},
+	} {
+		req := httptest.NewRequest(http.MethodGet, tc.path, nil)
+		if tc.auth {
+			req.SetBasicAuth("prom", "s3gredo-bem-longo")
+		}
+		rec := httptest.NewRecorder()
+		tc.s.http.Handler.ServeHTTP(rec, req)
+		if rec.Code != tc.want {
+			t.Errorf("%s (auth %v): %d, queria %d", tc.path, tc.auth, rec.Code, tc.want)
+		}
+	}
+}
+
 func TestRequestLogCarriesTraceID(t *testing.T) {
 	s, logs := newServer(t, time.Second)
 	rec := httptest.NewRecorder()

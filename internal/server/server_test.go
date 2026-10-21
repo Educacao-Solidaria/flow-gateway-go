@@ -77,6 +77,15 @@ func TestLivez(t *testing.T) {
 	}
 }
 
+func TestMetricsMounted(t *testing.T) {
+	s, _ := newServer(t, time.Second)
+	s.http.Handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/livez", nil))
+	var b strings.Builder
+	if err := s.Metrics().WriteText(&b); err != nil || !strings.Contains(b.String(), `flow_gateway_http_requests_total{route="/livez",method="GET",code="200"} 1`) {
+		t.Fatalf("middleware de métricas não montado: %v\n%s", err, b.String())
+	}
+}
+
 func TestRequestLogCarriesTraceID(t *testing.T) {
 	s, logs := newServer(t, time.Second)
 	rec := httptest.NewRecorder()

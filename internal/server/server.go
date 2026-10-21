@@ -1,5 +1,5 @@
 // Package server monta o servidor HTTP base do gateway: roteador chi,
-// middlewares de IP real, trace context, request id, log, recover e
+// middlewares de IP real, trace context, request id, log, métricas, recover e
 // compressão, e encerramento gracioso.
 package server
 
@@ -17,6 +17,7 @@ import (
 
 	"github.com/Educacao-Solidaria/flow-gateway-go/internal/config"
 	"github.com/Educacao-Solidaria/flow-gateway-go/internal/health"
+	"github.com/Educacao-Solidaria/flow-gateway-go/internal/metrics"
 	"github.com/Educacao-Solidaria/flow-gateway-go/internal/middleware"
 )
 
@@ -24,6 +25,7 @@ import (
 type Server struct {
 	http            *http.Server
 	log             *slog.Logger
+	metrics         *metrics.Gateway
 	shutdownTimeout time.Duration
 	shuttingDown    chan struct{}
 }
@@ -48,10 +50,12 @@ func New(cfg config.ServerConfig, log *slog.Logger, probes ...health.Probe) (*Se
 	if err != nil {
 		return nil, err
 	}
+	m := new(metrics.Gateway)
 	r := chi.NewRouter()
-	// A compressão fica por último: o log conta os bytes que de fato saem.
+	// A compressão fica por último: o log conta os bytes que de fato saem. As
+	// métricas ficam por fora do Recoverer: o panic chega a elas como 500.
 	r.Use(middleware.RealIP(trusted), middleware.TraceContext(trusted), middleware.RequestID(trusted),
-		requestLog(log), middleware.Recoverer(log), middleware.Compress())
+		requestLog(log), m.Middleware, middleware.Recoverer(log), middleware.Compress())
 	hc := health.New(log, cfg.HealthTimeout, probes...)
 	r.Get("/livez", hc.Live)
 	r.Get("/healthz", hc.Ready)
@@ -70,10 +74,15 @@ func New(cfg config.ServerConfig, log *slog.Logger, probes ...health.Probe) (*Se
 			BaseContext:       func(net.Listener) context.Context { return base },
 		},
 		log:             log,
+		metrics:         m,
 		shutdownTimeout: cfg.ShutdownTimeout,
 		shuttingDown:    shuttingDown,
 	}, nil
 }
+
+// Metrics devolve as métricas do servidor: o middleware HTTP já as alimenta; a
+// rota de LLM alimenta TTFT, resultado, tokens e cache pelos ganchos do Gateway.
+func (s *Server) Metrics() *metrics.Gateway { return s.metrics }
 
 // Run escuta em cfg.Addr e serve até ctx ser cancelado (ver Serve).
 func (s *Server) Run(ctx context.Context) error {

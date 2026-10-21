@@ -19,7 +19,7 @@ func TestObserveBuckets(t *testing.T) {
 		want int
 	}{
 		{-time.Second, 0}, {0, 0}, {time.Millisecond, 0}, {time.Millisecond + 1, 1},
-		{time.Second, 8}, {5 * time.Minute, last - 1}, {5*time.Minute + 1, last}, {time.Hour, last},
+		{800 * time.Millisecond, 8}, {time.Second, 9}, {5 * time.Minute, last - 1}, {5*time.Minute + 1, last}, {time.Hour, last},
 	} {
 		var l Latency
 		l.Observe(tc.d)

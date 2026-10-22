@@ -34,6 +34,7 @@ jobs:
         run: |
           mkdir -p "$SOAK_PROFILE_DIR"
           go test -run '^TestSoak$' -v -count=1 -timeout "$GO_TEST_TIMEOUT" ./internal/soak/
+          false # temporário: falha depois do heap.pb.gz para exercitar o passo do artefato (revertido a seguir)
       - name: perfil do heap
         if: failure()
         uses: actions/upload-artifact@v7

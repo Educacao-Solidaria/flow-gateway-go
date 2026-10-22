@@ -62,7 +62,7 @@ services:
     command: ["uvicorn", "app.api.server:create_server", "--factory", "--host", "0.0.0.0", "--port", "8000"]
     tmpfs: [/tmp]
     environment:
-      DATABASE_URL: postgresql+asyncpg://brain:${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD no .env}@db:5432/brain
+      DATABASE_URL: postgresql+asyncpg://brain:${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD no .env}@db:5432/outro
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:?defina OPENROUTER_API_KEY no .env}
       GATEWAY_URL: http://gateway:8080
     ports:

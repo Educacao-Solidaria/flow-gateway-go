@@ -40,6 +40,7 @@ var secretRef = regexp.MustCompile(`\$\{(\w+):\?[^}]+\}`)
 // service é o que os contratos fixam num serviço do compose.
 type service struct {
 	Build, Image, User string
+	Command            []string
 	EnvFile            any `yaml:"env_file"`
 	Environment        map[string]string
 	Volumes, Tmpfs     []string
@@ -145,6 +146,8 @@ func TestCompose(t *testing.T) {
 	assert.Contains(t, strings.Join(db.Healthcheck.Test, " "), "pg_isready -h 127.0.0.1 ", "saúde pelo TCP, não pelo socket do initdb")
 	assert.Equal(t, "postgresql+asyncpg://brain:"+pw+"@db:5432/brain", rag.Environment["DATABASE_URL"])
 	assert.Equal(t, "http://gateway:8080", rag.Environment["GATEWAY_URL"])
+	assert.Equal(t, []string{"uvicorn", "app.api.server:create_server", "--factory", "--host", "0.0.0.0", "--port", "8000"},
+		rag.Command, "a fábrica do RAG que põe o banco no /healthz")
 	assert.Equal(t, "service_healthy", rag.DependsOn["db"].Condition)
 	for _, name := range []string{"rag", "studio"} {
 		assert.Equal(t, []string{"/tmp"}, p.Services[name].Tmpfs, "%s: /tmp gravável com a raiz só leitura", name)
@@ -187,7 +190,8 @@ func stack(t *testing.T) func(args ...string) string {
 }
 
 // TestStackServes sonda as portas do host e, pela origem do estúdio (§5), o nginx dele
-// chegando a gateway, RAG e cache pelos nomes DNS do compose (502 se não chega).
+// chegando a gateway, RAG e cache pelos nomes DNS do compose (502 se não chega). O
+// /healthz do RAG só dá 200 com o Postgres respondendo (a fábrica do `command`).
 func TestStackServes(t *testing.T) {
 	stack(t)
 	client := &http.Client{Timeout: 5 * time.Second}
@@ -225,31 +229,4 @@ func TestStackCacheSocket(t *testing.T) {
 		}
 		assert.Equal(t, want, code, "--ping como %s: %s", user, out)
 	}
-}
-
-// ragProbe roda no container do rag com o ambiente do compose: o Settings do brain-router
-// valida o DATABASE_URL, o engine dele conecta no `db` pela rede interna, e a extensão
-// vector (que a migração 0001 cria) está disponível.
-const ragProbe = `
-import asyncio
-from sqlalchemy import text
-from app.db import Database
-from app.settings import Settings
-
-async def vector():
-    db = Database.from_settings(Settings())
-    try:
-        async with db.engine.connect() as conn:
-            return await conn.scalar(text("SELECT count(*) FROM pg_available_extensions WHERE name = 'vector'"))
-    finally:
-        await db.dispose()
-
-raise SystemExit(0 if asyncio.run(vector()) == 1 else 3)
-`
-
-// TestStackRAGDatabase prova o RAG com o banco pelo código do próprio RAG: a fábrica da
-// imagem ainda não lê o Settings, e o /healthz dela dá 200 sem olhar o banco.
-func TestStackRAGDatabase(t *testing.T) {
-	compose := stack(t)
-	compose("exec", "-T", "rag", "python", "-c", ragProbe)
 }

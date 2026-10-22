@@ -1,0 +1,51 @@
+goos: linux
+goarch: amd64
+pkg: example.com/a
+cpu: AMD Ryzen 7 8700G
+,base,,PR,,,
+,sec/op,CI,sec/op,CI,vs base,P
+Slower-4,1.0000000000000001e-07,0%,1.2000000000000002e-07,0%,+20.00%,p=0.000 n=10
+Limit-4,1.0000000000000001e-07,0%,1.1e-07,0%,+10.00%,p=0.000 n=10
+Noisy-4,2.5000000000000004e-07,60%,2.9500000000000003e-07,69%,~,p=1.000 n=10
+OnlyBase-4,1e-08,0%
+OnlyPR-4,,,1e-08,0%
+geomean,7.071067811865464e-08,,7.899488783920803e-08,,+15.92%,
+
+,base,,PR,,,
+,B/s,CI,B/s,CI,vs base,P
+Slower-4,1e+08,0%,2e+08,0%,+100.00%,p=0.000 n=10
+geomean,1.0000000000000018e+08,,2e+08,,+100.00%,
+
+,base,,PR,,,
+,B/op,CI,B/op,CI,vs base,P
+Slower-4,0,0%,8,0%,?,p=0.000 n=10
+Limit-4,100,0%,110,0%,+10.00%,p=0.000 n=10
+Noisy-4,16,0%,16,0%,~,p=1.000 n=10
+OnlyBase-4,0,0%
+OnlyPR-4,,,0,0%
+geomean,,,,,?,
+
+,base,,PR,,,
+,allocs/op,CI,allocs/op,CI,vs base,P
+Slower-4,0,0%,1,0%,?,p=0.000 n=10
+Limit-4,10,0%,11,0%,+10.00%,p=0.000 n=10
+Noisy-4,1,0%,1,0%,~,p=1.000 n=10
+OnlyBase-4,0,0%
+OnlyPR-4,,,0,0%
+geomean,,,,,?,
+
+pkg: example.com/b
+,base,,PR,,,
+,sec/op,CI,sec/op,CI,vs base,P
+Mixed-4,2.0000000000000002e-07,0%,1.5000000000000002e-07,0%,-25.00%,p=0.000 n=10
+geomean,1.9999999999999989e-07,,1.5000000000000007e-07,,-25.00%,
+
+,base,,PR,,,
+,B/op,CI,B/op,CI,vs base,P
+Mixed-4,32,0%,16,0%,-50.00%,p=0.000 n=10
+geomean,32,,15.999999999999998,,-50.00%,
+
+,base,,PR,,,
+,allocs/op,CI,allocs/op,CI,vs base,P
+Mixed-4,2,0%,3,0%,+50.00%,p=0.000 n=10
+geomean,2,,2.9999999999999996,,+50.00%,

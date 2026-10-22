@@ -1,6 +1,7 @@
 package docker
 
 import (
+	"bytes"
 	"errors"
 	"io"
 	"maps"
@@ -37,26 +38,33 @@ const (
 // sem valor padrão (vazia, o compose recusa subir).
 var secretRef = regexp.MustCompile(`\$\{(\w+):\?[^}]+\}`)
 
-// service é o que os contratos fixam num serviço do compose.
+// service traz as chaves que um serviço do compose pode usar. O loadCompose lê com
+// KnownFields: qualquer outra reprova, como `user` (o uid é o da imagem, §2), `env_file`
+// (entregaria o .env inteiro), `privileged`, `cap_add`, `devices`, `pid` e `volumes_from`.
 type service struct {
-	Build, Image, User string
-	Command            []string
-	EnvFile            any `yaml:"env_file"`
-	Environment        map[string]string
-	Volumes, Tmpfs     []string
-	Ports, Networks    []string
-	DependsOn          map[string]struct{ Condition string } `yaml:"depends_on"`
-	ReadOnly           bool                                  `yaml:"read_only"`
-	CapDrop            []string                              `yaml:"cap_drop"`
-	SecurityOpt        []string                              `yaml:"security_opt"`
-	Healthcheck        struct{ Test []string }
+	Build, Image    string
+	Command         []string
+	Environment     map[string]string
+	Volumes, Tmpfs  []string
+	Ports, Networks []string
+	DependsOn       map[string]struct{ Condition string } `yaml:"depends_on"`
+	ReadOnly        bool                                  `yaml:"read_only"`
+	CapDrop         []string                              `yaml:"cap_drop"`
+	SecurityOpt     []string                              `yaml:"security_opt"`
+	Healthcheck     struct {
+		Test              []string
+		Interval, Timeout string
+		Retries           int
+	}
 }
 
-// project é o compose como está no arquivo, sem interpolar o .env.
+// project é o compose como está no arquivo, sem interpolar o .env. Volume e rede não aceitam
+// opção: um driver_opts poria uma pasta do host no lugar do volume nomeado.
 type project struct {
 	Name     string
+	Hardened any `yaml:"x-hardened"` // a âncora; o efeito é conferido em cada serviço
 	Services map[string]service
-	Volumes  map[string]any
+	Volumes  map[string]struct{}
 	Networks map[string]struct{ Internal bool }
 }
 
@@ -66,7 +74,9 @@ func loadCompose(t *testing.T) (project, string) {
 	data, err := os.ReadFile(filepath.Join(root, composeDir, "compose.yaml"))
 	require.NoError(t, err)
 	var p project
-	require.NoError(t, yaml.Unmarshal(data, &p))
+	dec := yaml.NewDecoder(bytes.NewReader(data))
+	dec.KnownFields(true)
+	require.NoError(t, dec.Decode(&p), "chave que o teste não confere")
 	return p, string(data)
 }
 
@@ -76,17 +86,19 @@ func TestCompose(t *testing.T) {
 	assert.Equal(t, "educacao-solidaria", p.Name)
 
 	// Por serviço: a imagem (§2), o build na raiz de cada repo lado a lado (§1; relativo à raiz
-	// deste), a porta no host só no loopback (§4) e as redes (banco e cache só na interna).
+	// deste), a porta no host só no loopback (§4), as redes (banco e cache só na interna) e os
+	// volumes (§3: o socket só leitura no gateway; nenhum bind do host, nem do .env).
 	type spec struct {
 		image, build, port string
-		networks           []string
+		networks, volumes  []string
 	}
 	contract := map[string]spec{
-		"gateway": {"educacao-solidaria/flow-gateway:dev", ".", "8080", []string{"edge"}},
-		"cache":   {"educacao-solidaria/semantic-cache:dev", "../semantic-cache-rs", "", []string{"internal"}},
-		"rag":     {"educacao-solidaria/brain-router:dev", "../brain-router-py", "8000", []string{"edge", "internal"}},
-		"studio":  {"educacao-solidaria/agent-studio:dev", "../agent-studio-ts", "3000", []string{"edge", "internal"}},
-		"db":      {networks: []string{"internal"}},
+		"gateway": {"educacao-solidaria/flow-gateway:dev", ".", "8080", []string{"edge"}, []string{"cache-ipc:" + socketDir + ":ro"}},
+		"cache": {"educacao-solidaria/semantic-cache:dev", "../semantic-cache-rs", "", []string{"internal"},
+			[]string{"cache-ipc:" + socketDir, "cache-data:/var/lib/semantic-cache"}},
+		"rag":    {"educacao-solidaria/brain-router:dev", "../brain-router-py", "8000", []string{"edge", "internal"}, nil},
+		"studio": {"educacao-solidaria/agent-studio:dev", "../agent-studio-ts", "3000", []string{"edge", "internal"}, nil},
+		"db":     {networks: []string{"internal"}, volumes: []string{"pg-data:/var/lib/postgresql/data"}},
 	}
 	require.ElementsMatch(t, slices.Collect(maps.Keys(contract)), slices.Collect(maps.Keys(p.Services)), "nomes DNS fixos")
 	for name, want := range contract {
@@ -97,8 +109,7 @@ func TestCompose(t *testing.T) {
 		}
 		assert.Equal(t, ports, s.Ports, "%s: portas no host", name)
 		assert.Equal(t, want.networks, s.Networks, "%s: redes", name)
-		assert.Nil(t, s.EnvFile, "%s: env_file entregaria o .env inteiro", name)
-		assert.Empty(t, s.User, "%s: roda com o usuário da imagem", name)
+		assert.Equal(t, want.volumes, s.Volumes, "%s: volumes", name)
 		if name == "db" {
 			continue
 		}
@@ -111,10 +122,8 @@ func TestCompose(t *testing.T) {
 	assert.False(t, p.Networks["edge"].Internal, "as portas do host saem pela edge")
 	assert.ElementsMatch(t, []string{"cache-ipc", "cache-data", "pg-data"}, slices.Collect(maps.Keys(p.Volumes)))
 
-	// §3: o mesmo volume no mesmo ponto dos dois lados; a API HTTP do cache só na rede interna.
+	// §3: a API HTTP do cache só na rede interna, e o gateway sobe depois do PING do cache.
 	gw, cache, rag, db := p.Services["gateway"], p.Services["cache"], p.Services["rag"], p.Services["db"]
-	assert.Equal(t, []string{"cache-ipc:" + socketDir + ":ro"}, gw.Volumes, "o gateway só conecta no socket")
-	assert.Equal(t, []string{"cache-ipc:" + socketDir, "cache-data:/var/lib/semantic-cache"}, cache.Volumes)
 	assert.Equal(t, map[string]string{
 		"SEMCACHE_IPC_SOCKET_PATH": socket, "SEMCACHE_PERSISTENCE_PATH": "/var/lib/semantic-cache",
 		"SEMCACHE_HTTP_ENABLED": "true", "SEMCACHE_HTTP_LISTEN": "0.0.0.0:8099",
@@ -142,7 +151,6 @@ func TestCompose(t *testing.T) {
 	pw := db.Environment["POSTGRES_PASSWORD"]
 	assert.Equal(t, map[string]string{"POSTGRES_USER": "brain", "POSTGRES_DB": "brain", "POSTGRES_PASSWORD": pw}, db.Environment)
 	assert.Regexp(t, `^pgvector/pgvector:pg17@sha256:[0-9a-f]{64}$`, db.Image, "§2: a tag do contrato, fixada pelo digest")
-	assert.Equal(t, []string{"pg-data:/var/lib/postgresql/data"}, db.Volumes)
 	assert.Contains(t, strings.Join(db.Healthcheck.Test, " "), "pg_isready -h 127.0.0.1 ", "saúde pelo TCP, não pelo socket do initdb")
 	assert.Equal(t, "postgresql+asyncpg://brain:"+pw+"@db:5432/brain", rag.Environment["DATABASE_URL"])
 	assert.Equal(t, "http://gateway:8080", rag.Environment["GATEWAY_URL"])
@@ -166,11 +174,12 @@ func TestCompose(t *testing.T) {
 	assert.ElementsMatch(t, []string{"POSTGRES_PASSWORD", "OPENROUTER_API_KEY", "FLOW_OPENROUTER_API_KEY"}, keys)
 	secrets := map[string][]string{"gateway": {"FLOW_OPENROUTER_API_KEY"}, "rag": {"POSTGRES_PASSWORD", "OPENROUTER_API_KEY"}, "db": {"POSTGRES_PASSWORD"}}
 	for name, s := range p.Services {
+		// O serviço inteiro, não só o environment: um segredo no command também chega ao container.
+		out, err := yaml.Marshal(s)
+		require.NoError(t, err)
 		var got []string
-		for _, v := range s.Environment {
-			for _, m := range secretRef.FindAllStringSubmatch(v, -1) {
-				got = append(got, m[1])
-			}
+		for _, m := range secretRef.FindAllStringSubmatch(string(out), -1) {
+			got = append(got, m[1])
 		}
 		assert.ElementsMatch(t, secrets[name], got, "%s: segredos que o container recebe", name)
 	}
@@ -191,20 +200,23 @@ func stack(t *testing.T) func(args ...string) string {
 
 // TestStackServes sonda as portas do host e, pela origem do estúdio (§5), o nginx dele
 // chegando a gateway, RAG e cache pelos nomes DNS do compose (502 se não chega). O
-// /healthz do RAG só dá 200 com o Postgres respondendo (a fábrica do `command`).
+// /healthz do RAG só dá 200 com o Postgres respondendo (a fábrica do `command`), e o corpo
+// traz a checagem do banco: a fábrica sem banco também dá 200, com `checks` vazio.
 func TestStackServes(t *testing.T) {
 	stack(t)
 	client := &http.Client{Timeout: 5 * time.Second}
-	for _, url := range []string{
-		"http://127.0.0.1:8080/livez", "http://127.0.0.1:8080/healthz", "http://127.0.0.1:8000/healthz",
-		"http://127.0.0.1:3000/", "http://127.0.0.1:3000/health/gateway",
-		"http://127.0.0.1:3000/health/rag", "http://127.0.0.1:3000/health/cache",
+	const db = `"postgres":"ok"`
+	for url, want := range map[string]string{
+		"http://127.0.0.1:8080/livez": "", "http://127.0.0.1:8080/healthz": "", "http://127.0.0.1:8000/healthz": db,
+		"http://127.0.0.1:3000/": "", "http://127.0.0.1:3000/health/gateway": "",
+		"http://127.0.0.1:3000/health/rag": db, "http://127.0.0.1:3000/health/cache": "",
 	} {
 		res, err := client.Get(url)
 		if assert.NoError(t, err) {
 			body, _ := io.ReadAll(res.Body)
 			res.Body.Close()
 			assert.Equal(t, http.StatusOK, res.StatusCode, "%s: %s", url, body)
+			assert.Contains(t, string(body), want, "%s: o RAG com o banco", url)
 		}
 	}
 }

@@ -60,6 +60,7 @@ func TestRun(t *testing.T) {
 		{"linha da tabela", nil, data, 1, "| example.com/a | Slower-4 | B/op | 0 | 8 | +Inf% | p=0.000 n=10 |"},
 		{"label aceita", []string{"-accept"}, data, 0, "**4 piora(s) aceita(s) pela label `bench-ok`**"},
 		{"sem piora", nil, header + "Mixed-4,2e-07,0%,1.5e-07,0%,-25.00%,p=0.000 n=10\n", 0, "limite: 1 comparação(ões)"},
+		{"+10,04% reprova (2 casas)", nil, header + "X-4,1e-07,0%,1.1004e-07,0%,+10.04%,p=0.000 n=10\n", 1, "| +10.04% |"},
 		{"vazio", nil, "", 2, "nada a comparar"},
 		{"um lado só", nil, header + "OnlyBase-4,1e-08,0%\nOnlyPR-4,,,1e-08,0%\n", 2, "nada a comparar"},
 		{"número inválido", nil, header + "X-4,abc,0%,1,0%,+1.00%,p=0.000 n=10\n", 2, `X-4 sec/op: strconv.ParseFloat: parsing "abc"`},

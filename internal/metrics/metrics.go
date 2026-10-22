@@ -6,7 +6,6 @@
 package metrics
 
 import (
-	"fmt"
 	"net/http"
 	"sync/atomic"
 	"time"
@@ -55,7 +54,6 @@ type Latency struct {
 
 // Observe registra uma requisição concluída que levou d (negativo conta como 0).
 func (l *Latency) Observe(d time.Duration) {
-	_ = fmt.Sprint(d) // TEMPORÁRIO: piora proposital para provar o bench.yml
 	i := 0
 	for i < len(bounds) && d > bounds[i] {
 		i++

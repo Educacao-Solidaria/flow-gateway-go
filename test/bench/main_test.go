@@ -63,6 +63,7 @@ func TestRun(t *testing.T) {
 		{"vazio", nil, "", 2, "nada a comparar"},
 		{"um lado só", nil, header + "OnlyBase-4,1e-08,0%\nOnlyPR-4,,,1e-08,0%\n", 2, "nada a comparar"},
 		{"número inválido", nil, header + "X-4,abc,0%,1,0%,+1.00%,p=0.000 n=10\n", 2, `X-4 sec/op: strconv.ParseFloat: parsing "abc"`},
+		{"csv cortado depois de uma linha boa", nil, header + "Mixed-4,2e-07,0%,1.5e-07,0%,-25.00%,p=0.000 n=10\n\"X-4,1\n", 2, "quoted-field"},
 		{"limite negativo", []string{"-limit", "-1"}, data, 2, "use um número finito"},
 		{"limite NaN", []string{"-limit", "NaN"}, data, 2, "use um número finito"},
 		{"flag desconhecida", []string{"-x"}, data, 2, "flag provided but not defined"},

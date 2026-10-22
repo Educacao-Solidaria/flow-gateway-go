@@ -1,0 +1,14 @@
+# Lista de permissão: o contexto do build leva só o que `go build ./cmd/flow-gateway` lê.
+# Todo o resto fica de fora: .git, .env, bin/, dist/, coverage.out, docs, deploy, test/...
+*
+!go.mod
+!go.sum
+!cmd/
+!internal/
+!pkg/
+# Dentro das pastas liberadas: teste não entra (e não invalida o cache do build)
+# e segredo local nunca entra.
+**/*_test.go
+**/testdata
+**/.env
+**/.env.*

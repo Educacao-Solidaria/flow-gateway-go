@@ -70,7 +70,7 @@ func TestDockerfile(t *testing.T) {
 	for i, in := range ins {
 		if in.cmd == "FROM" {
 			froms, last = froms+1, i
-			assert.Regexp(t, `^\S+@sha256:[0-9a-f]{64}( AS \w+)?$`, in.args, "base fixada por digest (a tag fica no comentário)")
+			assert.Regexp(t, `^(--platform=\S+ )?\S+@sha256:[0-9a-f]{64}( (?i:as) [\w.-]+)?$`, in.args, "base fixada por digest (a tag fica no comentário)")
 		}
 	}
 	require.GreaterOrEqual(t, froms, 2, "multi-stage: compila num estágio e a imagem final só recebe o binário")

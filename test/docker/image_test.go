@@ -59,7 +59,10 @@ func TestImageConfig(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte(docker(t, "image", "inspect", img)), &inspect))
 	require.Len(t, inspect, 1)
 	got := inspect[0]
-	t.Logf("tamanho da imagem: %d bytes (%.1f MB)", got.Size, float64(got.Size)/1e6)
+	// O .Size depende do image store: no do containerd (o Docker 29 do ubuntu-latest)
+	// é o tamanho compactado até a imagem ser desempacotada. O tamanho desempacotado
+	// sai do docker export, em TestImageFiles.
+	t.Logf("docker image inspect: Size = %d bytes (%.1f MB)", got.Size, float64(got.Size)/1e6)
 	assert.Less(t, got.Size, int64(maxImageBytes), "contrato §2: imagem do gateway < 20 MB")
 	assert.Equal(t, "65532:65532", got.Config.User)
 	assert.Equal(t, map[string]struct{}{"8080/tcp": {}}, got.Config.ExposedPorts)
@@ -68,8 +71,8 @@ func TestImageConfig(t *testing.T) {
 	}
 }
 
-// TestImageFiles lê o sistema de arquivos da imagem: o binário está onde o
-// ENTRYPOINT aponta, o processo não consegue reescrevê-lo e não há shell.
+// TestImageFiles lê o sistema de arquivos da imagem: o tamanho desempacotado, o
+// binário onde o ENTRYPOINT aponta, sem escrita para o processo, e nenhum shell.
 func TestImageFiles(t *testing.T) {
 	img := image(t)
 	id := docker(t, "create", img)
@@ -79,6 +82,7 @@ func TestImageFiles(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, cmd.Start())
 	files := map[string]*tar.Header{}
+	var size int64
 	for tr := tar.NewReader(out); ; {
 		h, err := tr.Next()
 		if errors.Is(err, io.EOF) {
@@ -86,8 +90,13 @@ func TestImageFiles(t *testing.T) {
 		}
 		require.NoError(t, err)
 		files[path.Clean(h.Name)] = h
+		if h.Typeflag == tar.TypeReg {
+			size += h.Size
+		}
 	}
 	require.NoError(t, cmd.Wait())
+	t.Logf("arquivos da imagem, desempacotados: %d bytes (%.1f MB)", size, float64(size)/1e6)
+	assert.Less(t, size, int64(maxImageBytes), "contrato §2: imagem do gateway < 20 MB (desempacotada)")
 
 	bin := files["usr/local/bin/flow-gateway"]
 	require.NotNil(t, bin, "binário fora do caminho do ENTRYPOINT")

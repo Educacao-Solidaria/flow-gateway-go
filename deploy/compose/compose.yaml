@@ -29,7 +29,7 @@ services:
       FLOW_CACHE_SOCKET_PATH: /run/semantic-cache/semantic-cache.sock
       FLOW_CACHE_SOCKET_OWNER_UID: "65532"
     volumes:
-      - cache-ipc:/run/semantic-cache
+      - cache-ipc:/run/semantic-cache:ro # só conecta no socket: não mexe na pasta do cache
     ports:
       - "127.0.0.1:8080:8080"
     networks: [edge]

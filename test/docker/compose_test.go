@@ -112,7 +112,7 @@ func TestCompose(t *testing.T) {
 
 	// §3: o mesmo volume no mesmo ponto dos dois lados; a API HTTP do cache só na rede interna.
 	gw, cache, rag, db := p.Services["gateway"], p.Services["cache"], p.Services["rag"], p.Services["db"]
-	assert.Equal(t, []string{"cache-ipc:" + socketDir}, gw.Volumes)
+	assert.Equal(t, []string{"cache-ipc:" + socketDir + ":ro"}, gw.Volumes, "o gateway só conecta no socket")
 	assert.Equal(t, []string{"cache-ipc:" + socketDir, "cache-data:/var/lib/semantic-cache"}, cache.Volumes)
 	assert.Equal(t, map[string]string{
 		"SEMCACHE_IPC_SOCKET_PATH": socket, "SEMCACHE_PERSISTENCE_PATH": "/var/lib/semantic-cache",

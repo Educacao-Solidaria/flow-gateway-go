@@ -52,7 +52,8 @@ jobs:
       - name: contexto e tag de cada build, lidos do compose
         id: compose
         run: |
-          echo "build=$(docker compose config --format json | jq -c '.services | map_values({context: .build.context, image})')" >> "$GITHUB_OUTPUT"
+          build=$(docker compose config --format json | jq -ce '.services | map_values({context: .build.context, image})')
+          echo "build=$build" >> "$GITHUB_OUTPUT"
       - uses: docker/setup-buildx-action@v4
       - name: build gateway
         uses: docker/build-push-action@v7

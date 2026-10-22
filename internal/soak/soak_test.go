@@ -30,7 +30,7 @@ import (
 
 const workers = 16 // conexões da carga, cada uma com um pedido por vez
 
-// sample é uma leitura do runtime com a carga parada, logo depois de um runtime.GC().
+// sample é uma leitura do runtime com a carga parada, logo depois de dois runtime.GC().
 type sample struct {
 	at         time.Duration // desde o início da carga
 	heap       uint64        // /gc/heap/live:bytes: o que o GC marcou como vivo
@@ -93,6 +93,7 @@ func TestSoak(t *testing.T) {
 		mu.Lock()
 		defer mu.Unlock()
 		runtime.GC()
+		runtime.GC() // o 2º esvazia o cache vítima dos sync.Pool: o gzip da raspagem (~1,25 MiB) entrava em parte das amostras
 		m := []metrics.Sample{{Name: "/gc/heap/live:bytes"}, {Name: "/sched/goroutines:goroutines"}}
 		metrics.Read(m)
 		return sample{time.Since(start), m[0].Value.Uint64(), m[1].Value.Uint64(), count.Load()}

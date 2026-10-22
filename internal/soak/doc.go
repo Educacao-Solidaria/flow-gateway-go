@@ -9,8 +9,9 @@
 // a repetição da resiliência, e o upstream que cai depois do 1º pedaço). A cada
 // amostra (SOAK_DURATION/500, entre 1 s e 30 s) o /metrics é raspado, como
 // faria o Prometheus, e então a carga para: com o cliente sem pedido em voo
-// (o gateway ainda pode estar encerrando um cancelado), um runtime.GC() e o
-// runtime/metrics dão o heap vivo (/gc/heap/live:bytes) e as goroutines.
+// (o gateway ainda pode estar encerrando um cancelado), dois runtime.GC() (o 2º
+// esvazia os sync.Pool) e o runtime/metrics dão o heap vivo
+// (/gc/heap/live:bytes) e as goroutines.
 //
 // O teste falha se algum critério não valer:
 //   - heap: a reta de mínimos quadrados do heap vivo depois do aquecimento (o

@@ -68,7 +68,7 @@ func TestSoak(t *testing.T) {
 	require.NoError(t, call(context.Background(), hc, url, 1)) // abre a conexão do udscache, que fica até o Close
 	base := quiet(hc, st)
 
-	var mu sync.RWMutex // os pedidos levam a leitura; a amostra, a escrita: com ela, nenhum pedido em voo
+	var mu sync.RWMutex // os pedidos levam a leitura; a amostra, a escrita: com ela, o cliente não tem pedido em voo
 	var count, failed atomic.Int64
 	ctx, stop := context.WithCancel(context.Background())
 	var wg sync.WaitGroup

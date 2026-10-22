@@ -8,8 +8,9 @@
 // no meio do stream e 2 terminam no evento de erro (503 em toda tentativa, com
 // a repetição da resiliência, e o upstream que cai depois do 1º pedaço). A cada
 // amostra (SOAK_DURATION/500, entre 1 s e 30 s) o /metrics é raspado, como
-// faria o Prometheus, e então a carga para: sem pedido em voo, um runtime.GC()
-// e o runtime/metrics dão o heap vivo (/gc/heap/live:bytes) e as goroutines.
+// faria o Prometheus, e então a carga para: com o cliente sem pedido em voo
+// (o gateway ainda pode estar encerrando um cancelado), um runtime.GC() e o
+// runtime/metrics dão o heap vivo (/gc/heap/live:bytes) e as goroutines.
 //
 // O teste falha se algum critério não valer:
 //   - heap: a reta de mínimos quadrados do heap vivo depois do aquecimento (o

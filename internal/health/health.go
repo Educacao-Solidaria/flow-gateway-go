@@ -79,7 +79,7 @@ func New(log *slog.Logger, timeout time.Duration, probes ...Probe) *Checker {
 // Live responde 200 enquanto o processo atende requisições; não toca em
 // dependência, para o orquestrador não reiniciar o gateway por culpa de outro.
 func (c *Checker) Live(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusServiceUnavailable, Report{Status: StatusOK, UptimeSeconds: c.uptime()})
+	writeJSON(w, http.StatusOK, Report{Status: StatusOK, UptimeSeconds: c.uptime()})
 }
 
 // Ready roda todas as probes em paralelo, cada uma limitada a timeout, e

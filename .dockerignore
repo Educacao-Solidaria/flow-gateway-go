@@ -12,4 +12,3 @@
 **/testdata
 **/.env
 **/.env.*
-!**/.env

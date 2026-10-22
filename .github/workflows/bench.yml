@@ -34,7 +34,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ github.event.pull_request.number }}
         run: |
-          labels=$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR/labels" --jq '.[].name')
+          labels=$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR/labels?per_page=100" --jq '.[].name')
           if grep -qx bench-ok <<<"$labels"; then echo ACCEPT=true >>"$GITHUB_ENV"; fi
       - name: benchmarks
         env:

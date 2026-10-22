@@ -7,7 +7,7 @@
 #   BENCH=Observe test/bench/run.sh    (só os benchmarks que casam com o padrão)
 # Precisa de go, git e benchstat. O veredito sai em Markdown (também no
 # GITHUB_STEP_SUMMARY) e o progresso na saída de erro. Sai 0 sem piora (ou com a
-# piora aceita por ACCEPT=true), 1 com piora e outro código em erro.
+# piora aceita por ACCEPT=true); com piora ou erro, sai diferente de 0.
 set -euo pipefail
 export LC_ALL=C
 cd "$(dirname "$0")/../.."
@@ -22,13 +22,14 @@ touch "$out/base.txt" "$out/pr.txt"
 git archive "$base" | tar -x -C "$out/src"
 go build -o "$out/gate" ./test/bench
 
-# Pacotes com benchmark em qualquer dos lados; um binário de teste por lado.
+# Pacotes com benchmark em qualquer dos lados; um binário de teste por lado. Com
+# -trimpath, o binário de um pacote que o PR não toca sai idêntico ao da base.
 pkgs=$(for t in . "$out/src"; do (cd "$t" && grep -rl --include='*_test.go' '^func Benchmark' . || true); done |
   xargs -r -n1 dirname | sort -u)
 for d in $pkgs; do
-  if [ -d "$d" ]; then go test -c -o "$out/pr/${d//\//_}.test" "$d"; fi
+  if [ -d "$d" ]; then go test -c -trimpath -o "$out/pr/${d//\//_}.test" "$d"; fi
   if [ -d "$out/src/$d" ]; then
-    (cd "$out/src" && go test -c -o "$out/base/${d//\//_}.test" "$d") || echo "aviso: $d não compila na base" >&2
+    (cd "$out/src" && go test -c -trimpath -o "$out/base/${d//\//_}.test" "$d") || echo "aviso: $d não compila na base" >&2
   fi
 done
 

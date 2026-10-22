@@ -180,10 +180,18 @@ func BrainRouter(content string) http.Handler {
 	})
 }
 
+// Marcas que a OpenRouter de mentira (Stream) procura no pedido, para quem
+// precisa dos caminhos de erro do gateway (o soak): o prompt com FailPrefix
+// recebe 503 em toda tentativa; com CutPrefix, a conexão cai depois do 1º pedaço.
+const (
+	FailPrefix = "falha:"
+	CutPrefix  = "corte:"
+)
+
 // Stream é a OpenRouter de mentira da carga: o comentário de keep-alive na
 // hora, n pedaços SSE (o 1º após ttft, os outros a cada gap, o último com
-// finish_reason "stop") e o [DONE]. Sem estado: o openroutertest anota cada
-// chamada e cresceria sem parar sob carga.
+// finish_reason "stop") e o [DONE]; ver FailPrefix e CutPrefix. Sem estado: o
+// openroutertest anota cada chamada e cresceria sem parar sob carga.
 func Stream(ttft, gap time.Duration, n int) http.Handler {
 	events := make([][]byte, n)
 	for i := range events {
@@ -195,7 +203,12 @@ func Stream(ttft, gap time.Duration, n int) http.Handler {
 		events[i] = fmt.Appendf(nil, "data: %s\n\n", data)
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = io.Copy(io.Discard, r.Body) // até o EOF: só assim o servidor percebe quem desconecta
+		body, _ := io.ReadAll(r.Body) // até o EOF: só assim o servidor percebe quem desconecta
+		if bytes.Contains(body, []byte(FailPrefix)) {
+			http.Error(w, "falha de mentira", http.StatusServiceUnavailable)
+			return
+		}
+		cut := bytes.Contains(body, []byte(CutPrefix))
 		w.Header().Set("Content-Type", "text/event-stream")
 		rc := http.NewResponseController(w)
 		_, _ = io.WriteString(w, ": OPENROUTER PROCESSING\n\n")
@@ -213,6 +226,9 @@ func Stream(ttft, gap time.Duration, n int) http.Handler {
 			}
 			_, _ = w.Write(ev)
 			_ = rc.Flush()
+			if cut {
+				panic(http.ErrAbortHandler) // o servidor derruba a conexão sem fechar o corpo
+			}
 		}
 		_, _ = io.WriteString(w, "data: [DONE]\n\n")
 	})

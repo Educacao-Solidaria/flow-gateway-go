@@ -60,6 +60,9 @@ func TestStartAndClose(t *testing.T) {
 	}
 	metrics, _ := get(http.MethodGet, "/metrics", "")
 	assert.Contains(t, metrics, `flow_gateway_http_requests_total{route="/v1/chat/completions",method="POST",code="200"} 2`)
+	fail := chat(FailPrefix + " oi") // 503 em toda tentativa: o erro chega sem pedaço
+	assert.True(t, strings.HasPrefix(fail, "event: error\n") && !strings.Contains(fail, "event: chunk"), "%q", fail)
+	assert.Regexp(t, `(?s)^id: 1\nevent: chunk\n.*\nevent: error\n`, chat(CutPrefix+" oi"), "a conexão cai depois do 1º pedaço")
 
 	hc.CloseIdleConnections()
 	require.NoError(t, st.Close())

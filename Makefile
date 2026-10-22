@@ -13,7 +13,7 @@ os   = $(word 1,$(subst /, ,$1))
 arch = $(word 2,$(subst /, ,$1))
 
 .DEFAULT_GOAL := help
-.PHONY: help build run test race cover lint fmt fmt-check tidy check cross build-linux build-darwin build-windows docker docker-test clean $(PLATFORMS)
+.PHONY: help build run test race cover lint fmt fmt-check tidy check cross build-linux build-darwin build-windows docker docker-test compose compose-test clean $(PLATFORMS)
 
 help: ## lista os targets disponíveis
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z_-]+:.*## / {printf "  %-14s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -63,6 +63,12 @@ docker: ## constrói a imagem $(IMAGE) (multi-stage, distroless)
 
 docker-test: ## testa a imagem $(IMAGE) como o CI (precisa do Docker)
 	GATEWAY_IMAGE=$(IMAGE) go test -count=1 -run '^TestImage' ./test/docker/
+
+compose: ## sobe o ecossistema do deploy/compose (os 4 repos lado a lado e o .env de lá)
+	docker compose -f deploy/compose/compose.yaml up -d --build --wait
+
+compose-test: ## sonda o ecossistema já de pé como o CI
+	COMPOSE_STACK=1 go test -count=1 -run '^TestStack' ./test/docker/
 
 clean: ## remove artefatos de build
 	rm -rf bin $(DIST) coverage.out

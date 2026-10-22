@@ -1,0 +1,110 @@
+# Ecossistema local (contratos da Fase 5, §1–§4): gateway (este repo), cache, RAG, banco e
+# estúdio. Os 4 repositórios ficam clonados lado a lado na mesma pasta pai, e cada `build:`
+# aponta para a raiz de um deles.
+#   cd deploy/compose
+#   cp .env.example .env              # preencha as 3 variáveis (o .env fica fora do git)
+#   docker compose up -d --build --wait
+#   # estúdio em http://127.0.0.1:3000, que fala com o resto pela mesma origem
+#   docker compose down               # os dados ficam nos volumes; `down -v` os apaga
+# Só estúdio, gateway e RAG vão para o host, e só no loopback: as APIs não têm autenticação.
+# A rede `internal` não tem saída para fora, e banco e cache só existem nela.
+name: educacao-solidaria
+
+# Raiz somente leitura, sem capabilities e sem escalada de privilégio, com o usuário de cada
+# imagem (nenhum `user:` aqui): 65532 no gateway e no cache, 10001 no RAG, 101 no estúdio.
+x-hardened: &hardened
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+
+services:
+  gateway:
+    <<: *hardened
+    build: ../..
+    image: educacao-solidaria/flow-gateway:dev
+    environment:
+      FLOW_ENV: production
+      FLOW_OPENROUTER_API_KEY: ${FLOW_OPENROUTER_API_KEY:?defina FLOW_OPENROUTER_API_KEY no .env}
+      # O socket do cache pelo volume compartilhado, com o dono conferido (docs/ipc-v1.md).
+      FLOW_CACHE_SOCKET_PATH: /run/semantic-cache/semantic-cache.sock
+      FLOW_CACHE_SOCKET_OWNER_UID: "65532"
+    volumes:
+      - cache-ipc:/run/semantic-cache:ro # só conecta no socket: não mexe na pasta do cache
+    ports:
+      - "127.0.0.1:8080:8080"
+    networks: [edge]
+    # Sem healthcheck: a distroless não tem shell e o binário não tem modo de sonda (o CI sonda
+    # o /livez de fora). Sobe depois do PING do cache pelo socket, o HEALTHCHECK da imagem dele.
+    depends_on:
+      cache:
+        condition: service_healthy
+
+  cache:
+    <<: *hardened
+    build: ../../../semantic-cache-rs
+    image: educacao-solidaria/semantic-cache:dev
+    environment:
+      SEMCACHE_IPC_SOCKET_PATH: /run/semantic-cache/semantic-cache.sock
+      SEMCACHE_PERSISTENCE_PATH: /var/lib/semantic-cache
+      # API HTTP de depuração só na rede interna: fora do loopback o filtro de Host não vale.
+      SEMCACHE_HTTP_ENABLED: "true"
+      SEMCACHE_HTTP_LISTEN: 0.0.0.0:8099
+    volumes:
+      - cache-ipc:/run/semantic-cache
+      - cache-data:/var/lib/semantic-cache
+    networks: [internal]
+
+  rag:
+    <<: *hardened
+    build: ../../../brain-router-py
+    image: educacao-solidaria/brain-router:dev
+    # A fábrica com o banco no /healthz, a do compose do brain-router-py (o CMD da imagem sobe sem ele).
+    command: ["uvicorn", "app.api.server:create_server", "--factory", "--host", "0.0.0.0", "--port", "8000"]
+    tmpfs: [/tmp]
+    environment:
+      DATABASE_URL: postgresql+asyncpg://brain:${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD no .env}@db:5432/brain
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:?defina OPENROUTER_API_KEY no .env}
+      GATEWAY_URL: http://gateway:8080
+    ports:
+      - "127.0.0.1:8000:8000"
+    networks: [edge, internal]
+    depends_on:
+      db:
+        condition: service_healthy
+
+  db:
+    # pgvector 0.8.7 sobre o PostgreSQL 17 (bookworm): a tag pg17 em 22/10/2026, fixada pelo
+    # digest do índice multi-arquitetura (o mesmo do compose do brain-router-py).
+    image: pgvector/pgvector:pg17@sha256:ac08538c6f8b9904c33c8224c5e5706dbe760aca29db1d096972b4052c22a75d
+    environment:
+      POSTGRES_USER: brain
+      POSTGRES_DB: brain
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD no .env}
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    # Pelo TCP: na 1ª partida o initdb roda num servidor só de socket unix.
+    healthcheck:
+      test: [CMD, pg_isready, -h, 127.0.0.1, -U, brain, -d, brain]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks: [internal]
+
+  studio:
+    <<: *hardened
+    build: ../../../agent-studio-ts
+    image: educacao-solidaria/agent-studio:dev
+    tmpfs: [/tmp] # pid e temporários do nginx (o upload de até 2 MiB passa por disco)
+    ports:
+      - "127.0.0.1:3000:3000"
+    networks: [edge, internal]
+
+volumes:
+  cache-ipc:
+  cache-data:
+  pg-data:
+
+networks:
+  edge:
+  internal:
+    internal: true

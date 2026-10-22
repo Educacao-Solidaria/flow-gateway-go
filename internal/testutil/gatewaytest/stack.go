@@ -50,8 +50,13 @@ type Fakes struct {
 type Stack struct {
 	URL     string              // base do gateway; a rota é POST URL+"/v1/chat/completions"
 	Writer  *cachewriter.Writer // Stats: o destino das gravações no cache
+	hc      *http.Client        // o do gateway para o upstream e o RAG
 	closers []func() error      // o Close roda do último para o primeiro
 }
+
+// CloseIdleConnections fecha as conexões ociosas do gateway com o upstream e o
+// RAG: quem conta goroutines antes e depois de uma carga compara sem o pool.
+func (s *Stack) CloseIdleConnections() { s.hc.CloseIdleConnections() }
 
 // Start sobe os fakes e, em cfg.Server.Addr, a Route atrás do server.New
 // (middlewares, /metrics com a credencial de cfg.Server, encerramento), com o
@@ -83,6 +88,7 @@ func (s *Stack) start(cfg *config.Config, f Fakes, log *slog.Logger) error {
 	llm, brain := httptest.NewServer(Stream(f.TTFT, f.Gap, f.Chunks)), httptest.NewServer(BrainRouter("trecho do RAG"))
 	s.closers = append(s.closers, func() error { llm.Close(); brain.Close(); return nil })
 	hc := httpclient.New(cfg.OpenRouter)
+	s.hc = hc
 	uc := udscache.New(sock, -1, log)
 	s.closers = append(s.closers, func() error { hc.CloseIdleConnections(); return uc.Close() })
 	rc, err1 := raghttp.New(brain.URL, hc)

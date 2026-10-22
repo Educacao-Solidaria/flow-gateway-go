@@ -1,0 +1,44 @@
+name: soak
+
+# Estabilidade contínua do gateway sobre fakes (internal/soak): 3 min no PR; a rodada longa é sob demanda.
+on:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      duration:
+        description: duração da carga no formato do Go (até 5h40m; o job hospedado tem teto de 6 h)
+        default: "4h"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: soak-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  soak:
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ github.event_name == 'workflow_dispatch' && 355 || 15 }}
+    env:
+      SOAK_DURATION: ${{ inputs.duration || '3m' }}
+      GO_TEST_TIMEOUT: ${{ github.event_name == 'workflow_dispatch' && '345m' || '12m' }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version: stable
+      - name: soak
+        env:
+          SOAK_PROFILE_DIR: ${{ runner.temp }}/soak
+        run: |
+          mkdir -p "$SOAK_PROFILE_DIR"
+          go test -run '^TestSoak$' -v -count=1 -timeout "$GO_TEST_TIMEOUT" ./internal/soak/
+      - name: perfil do heap
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: soak-heap
+          path: ${{ runner.temp }}/soak/
+          if-no-files-found: ignore
+          retention-days: 14

@@ -43,7 +43,6 @@ services:
     <<: *hardened
     build: ../../../semantic-cache-rs
     image: educacao-solidaria/semantic-cache:dev
-    user: "0:0"
     environment:
       SEMCACHE_IPC_SOCKET_PATH: /run/semantic-cache/semantic-cache.sock
       SEMCACHE_PERSISTENCE_PATH: /var/lib/semantic-cache

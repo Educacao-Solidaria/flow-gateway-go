@@ -18,7 +18,7 @@ concurrency:
 jobs:
   bench:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 20 # ~5 min medidos; o -test.timeout de 10 min de cada binário vence antes
     steps:
       - uses: actions/checkout@v5
         with:

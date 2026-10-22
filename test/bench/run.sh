@@ -18,7 +18,9 @@ command -v benchstat >/dev/null || { echo "falta o benchstat (golang.org/x/perf/
 out=$(mktemp -d)
 trap 'rm -rf "$out"' EXIT
 mkdir "$out/src" "$out/base" "$out/pr"
-touch "$out/base.txt" "$out/pr.txt"
+touch "$out/base.txt" "$out/pr.txt" "$out/warn.md"
+# o que a base deixou de medir vai também para o resumo: o portão compara menos
+warn() { echo "aviso: $*" >&2; echo "- $*" >>"$out/warn.md"; }
 git archive "$base" | tar -x -C "$out/src"
 go build -o "$out/gate" ./test/bench
 
@@ -29,9 +31,9 @@ pkgs=$(for t in . "$out/src"; do (cd "$t" && grep -rl --include='*_test.go' '^fu
 for d in $pkgs; do
   if [ -d "$d" ]; then go test -c -trimpath -o "$out/pr/${d//\//_}.test" "$d"; fi
   if [ -d "$out/src/$d" ]; then
-    (cd "$out/src" && go test -c -trimpath -o "$out/base/${d//\//_}.test" "$d") || echo "aviso: $d não compila na base" >&2
+    (cd "$out/src" && go test -c -trimpath -o "$out/base/${d//\//_}.test" "$d") || warn "$d não compila na base"
   fi
-done
+done >&2
 
 # bench <lado> <pacote>: uma rodada, anexada a <lado>.txt. Falha no PR encerra;
 # na base só avisa e a rodada fica de fora (o PR é que está em julgamento).
@@ -46,7 +48,7 @@ bench() {
   fi
   cat "$out/last.txt" >&2
   [ "$1" = base ] || exit 2
-  echo "aviso: os benchmarks de $2 falharam na base" >&2
+  warn "os benchmarks de $2 falharam na base; a volta ficou de fora"
 }
 for i in $(seq "$count"); do
   sides="base pr"
@@ -61,6 +63,7 @@ benchstat -format csv base="$out/base.txt" PR="$out/pr.txt" 2>/dev/null |
   "$out/gate" -limit "${LIMIT:-10}" -accept="${ACCEPT:-false}" >"$out/verdict.md" || rc=$?
 {
   cat "$out/verdict.md"
+  if [ -s "$out/warn.md" ]; then printf '\n**Avisos:**\n'; sort -u "$out/warn.md"; fi
   printf '\n<details><summary>benchstat: %s rodadas de %s por lado, base %s</summary>\n\n```\n' \
     "$count" "$benchtime" "$(git rev-parse --short "$base")"
   cat "$out/table.txt"

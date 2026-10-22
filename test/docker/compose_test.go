@@ -229,7 +229,7 @@ func TestStackCacheSocket(t *testing.T) {
 	compose := stack(t)
 	p, _ := loadCompose(t)
 	gateway := compose("ps", "-q", "gateway")
-	for user, want := range map[string]int{"65532:65532": 0, "0:0": 1} {
+	for user, want := range map[string]int{"65532:65532": 0, "10001:10001": 1} {
 		out, err := exec.Command("docker", "run", "--rm", "--network=none", "--volumes-from="+gateway, "--user="+user,
 			"--env=SEMCACHE_IPC_SOCKET_PATH="+p.Services["gateway"].Environment["FLOW_CACHE_SOCKET_PATH"],
 			p.Services["cache"].Image, "--ping").CombinedOutput()

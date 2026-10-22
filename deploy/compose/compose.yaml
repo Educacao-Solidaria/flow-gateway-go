@@ -26,7 +26,7 @@ services:
       FLOW_ENV: production
       FLOW_OPENROUTER_API_KEY: ${FLOW_OPENROUTER_API_KEY:?defina FLOW_OPENROUTER_API_KEY no .env}
       # O socket do cache pelo volume compartilhado, com o dono conferido (docs/ipc-v1.md).
-      FLOW_CACHE_SOCKET_PATH: /run/semantic-cache/semantic-cache.sock
+      FLOW_CACHE_SOCKET_PATH: /run/semantic-cache/outro.sock
       FLOW_CACHE_SOCKET_OWNER_UID: "65532"
     volumes:
       - cache-ipc:/run/semantic-cache:ro # só conecta no socket: não mexe na pasta do cache
@@ -48,7 +48,7 @@ services:
       SEMCACHE_PERSISTENCE_PATH: /var/lib/semantic-cache
       # API HTTP de depuração só na rede interna: fora do loopback o filtro de Host não vale.
       SEMCACHE_HTTP_ENABLED: "true"
-      SEMCACHE_HTTP_LISTEN: 0.0.0.0:8099
+      SEMCACHE_HTTP_LISTEN: 127.0.0.1:8099
     volumes:
       - cache-ipc:/run/semantic-cache
       - cache-data:/var/lib/semantic-cache
@@ -60,11 +60,11 @@ services:
     image: educacao-solidaria/brain-router:dev
     tmpfs: [/tmp]
     environment:
-      DATABASE_URL: postgresql+asyncpg://brain:${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD no .env}@db:5432/brain
+      DATABASE_URL: postgresql+asyncpg://brain:${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD no .env}@db:5432/outro
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:?defina OPENROUTER_API_KEY no .env}
       GATEWAY_URL: http://gateway:8080
     ports:
-      - "127.0.0.1:8000:8000"
+      - "127.0.0.1:8001:8000"
     networks: [edge, internal]
     depends_on:
       db:

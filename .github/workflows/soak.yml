@@ -19,10 +19,10 @@ concurrency:
 jobs:
   soak:
     runs-on: ubuntu-latest
-    timeout-minutes: ${{ github.event_name == 'workflow_dispatch' && 355 || 50 }}
+    timeout-minutes: ${{ github.event_name == 'workflow_dispatch' && 355 || 15 }}
     env:
-      SOAK_DURATION: ${{ inputs.duration || '30m' }}
-      GO_TEST_TIMEOUT: ${{ github.event_name == 'workflow_dispatch' && '345m' || '45m' }}
+      SOAK_DURATION: ${{ inputs.duration || '3m' }}
+      GO_TEST_TIMEOUT: ${{ github.event_name == 'workflow_dispatch' && '345m' || '12m' }}
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-go@v6

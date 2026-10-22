@@ -6,13 +6,14 @@ VERSION   ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo de
 COMMIT    ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo none)
 LDFLAGS   := -s -w -X $(MODULE)/internal/version.Version=$(VERSION) -X $(MODULE)/internal/version.Commit=$(COMMIT)
 GOBUILD   := CGO_ENABLED=0 go build -trimpath -ldflags "$(LDFLAGS)"
+IMAGE     ?= educacao-solidaria/flow-gateway:dev
 PLATFORMS := linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64
 
 os   = $(word 1,$(subst /, ,$1))
 arch = $(word 2,$(subst /, ,$1))
 
 .DEFAULT_GOAL := help
-.PHONY: help build run test race cover lint fmt fmt-check tidy check cross build-linux build-darwin build-windows clean $(PLATFORMS)
+.PHONY: help build run test race cover lint fmt fmt-check tidy check cross build-linux build-darwin build-windows docker docker-test clean $(PLATFORMS)
 
 help: ## lista os targets disponíveis
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z_-]+:.*## / {printf "  %-14s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -56,6 +57,12 @@ build-windows: windows/amd64 windows/arm64 ## binários windows
 $(PLATFORMS):
 	GOOS=$(call os,$@) GOARCH=$(call arch,$@) $(GOBUILD) \
 		-o $(DIST)/$(BINARY)-$(call os,$@)-$(call arch,$@)$(if $(filter windows,$(call os,$@)),.exe) $(MAIN)
+
+docker: ## constrói a imagem $(IMAGE) (multi-stage, distroless)
+	docker build --build-arg VERSION=$(VERSION) --build-arg COMMIT=$(COMMIT) -t $(IMAGE) .
+
+docker-test: ## testa a imagem $(IMAGE) como o CI (precisa do Docker)
+	GATEWAY_IMAGE=$(IMAGE) go test -count=1 -run '^TestImage' ./test/docker/
 
 clean: ## remove artefatos de build
 	rm -rf bin $(DIST) coverage.out

@@ -89,6 +89,8 @@ func (g Route) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func Embed(prompt string) []float32 {
 	h := fnv.New64a()
 	_, _ = h.Write([]byte(prompt))
+	// #nosec G404 -- vetor de mentira e determinístico de propósito (semente = hash do prompt),
+	// só para teste e carga. Revisar em 2027-01-22.
 	r := rand.New(rand.NewPCG(h.Sum64(), 0))
 	v := make([]float32, 1536)
 	for i := range v {

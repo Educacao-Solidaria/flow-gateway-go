@@ -13,7 +13,7 @@ os   = $(word 1,$(subst /, ,$1))
 arch = $(word 2,$(subst /, ,$1))
 
 .DEFAULT_GOAL := help
-.PHONY: help build run test race cover lint fmt fmt-check tidy check cross build-linux build-darwin build-windows docker docker-test compose compose-test release-snapshot clean $(PLATFORMS)
+.PHONY: help build run test race cover lint fmt fmt-check tidy check cross build-linux build-darwin build-windows docker docker-test compose compose-test release-snapshot audit clean $(PLATFORMS)
 
 help: ## lista os targets disponíveis
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z_-]+:.*## / {printf "  %-14s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -74,6 +74,10 @@ release-snapshot: ## release em dist/ sem publicar e os testes dos pacotes, como
 	goreleaser check
 	goreleaser release --snapshot --clean
 	RELEASE_DIST=dist go test -count=1 -timeout 2m -run '^TestSnapshot$$' ./test/release/
+
+audit: ## gosec e trivy fs como o CI (precisa dos dois no PATH; o trivy image fica com o CI)
+	gosec -terse -severity high -nosec-require-rules -nosec-require-justification ./...
+	trivy fs --scanners vuln,secret,misconfig --severity HIGH,CRITICAL --ignore-unfixed --ignorefile .trivyignore --show-suppressed --exit-code 1 .
 
 clean: ## remove artefatos de build
 	rm -rf bin $(DIST) coverage.out

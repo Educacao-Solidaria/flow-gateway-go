@@ -44,6 +44,8 @@ var randRead = rand.Read
 // NewTraceID gera um trace_id aleatório de 128 bits em hex (formato W3C).
 func NewTraceID() string {
 	var b [16]byte
+	// #nosec G404 -- fallback do trace_id (abaixo), que não é segredo. Revisar em 2027-01-22,
+	// com a decisão de subir o go.mod: no Go 1.24+ o crypto/rand.Read não falha e ele sai.
 	if _, err := randRead(b[:]); err != nil {
 		// Antes do Go 1.24 crypto/rand.Read pode falhar (o go.mod aceita 1.23).
 		// trace_id não é segredo: math/rand/v2 basta para não devolver zeros.

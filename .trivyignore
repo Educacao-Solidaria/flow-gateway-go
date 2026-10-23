@@ -1,0 +1,18 @@
+# Exceções do trivy (contrato da Fase 5, §6; workflow security.yml). Cada uma com o motivo
+# no comentário logo acima e a data de revisão no `exp:`: a partir dela (00:00 UTC) a
+# exceção deixa de valer e o achado volta a reprovar. As regras do formato estão em
+# test/security.
+
+# github.com/klauspost/compress 1.18.4: GO-2026-5841 (GHSA-259r-337f-4rfw), estouro de
+# inteiro em s2.NewDict. A correção (1.18.7) exige go 1.24 no go.mod, que está em 1.23.0:
+# decisão pendente do Victor. O pacote s2 não entra no binário (o gzhttp usa gzip, flate e
+# zstd); o govulncheck só acha o módulo requerido, sem o pacote importado.
+CVE-2026-63209 exp:2027-01-22
+
+# golang.org/x/text 0.28.0: GO-2026-5970 (norm.Iter em laço infinito com UTF-8 inválido) e
+# GO-2026-6629 (pânico no secure/precis). As correções (0.39.0 e 0.41.0) exigem go 1.25.0
+# no go.mod: a mesma decisão pendente. O unicode/norm entra no binário pelo viper (afero),
+# mas o govulncheck não acha chamada a nenhum símbolo vulnerável; o secure/precis nem é
+# importado.
+CVE-2026-56852 exp:2027-01-22
+CVE-2026-56851 exp:2027-01-22

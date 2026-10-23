@@ -53,7 +53,6 @@ jobs:
       - name: testes da imagem
         env:
           GATEWAY_IMAGE_VERSION: flow-gateway dev (${{ github.sha }})
-          GATEWAY_IMAGE: ""
         # Sem GATEWAY_IMAGE os TestImage* pulam: o grep reprova o SKIP e o -run que não acha o smoke.
         run: |
           go test -count=1 -v -run '^TestImage' ./test/docker/ | tee "$RUNNER_TEMP/image.log"

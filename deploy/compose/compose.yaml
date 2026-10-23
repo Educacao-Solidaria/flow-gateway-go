@@ -58,8 +58,8 @@ services:
     <<: *hardened
     build: ../../../brain-router-py
     image: educacao-solidaria/brain-router:dev
-    # Sem `command`: o CMD da imagem (`brain-router migrate -- uvicorn …`) espera o banco, migra até
-    # a head e só então serve a fábrica com o Postgres no /healthz. Sobrepô-lo pula a migração.
+    # A fábrica com o banco no /healthz, a do compose do brain-router-py (o CMD da imagem sobe sem ele).
+    command: ["uvicorn", "app.api.server:create_server", "--factory", "--host", "0.0.0.0", "--port", "8000"]
     tmpfs: [/tmp]
     environment:
       DATABASE_URL: postgresql+asyncpg://brain:${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD no .env}@db:5432/brain

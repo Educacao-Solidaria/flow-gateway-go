@@ -1,3 +1,0 @@
-scan:
-  skip-files:
-    - deploy/zz-mut/b/Dockerfile

@@ -39,11 +39,11 @@ const (
 var secretRef = regexp.MustCompile(`\$\{(\w+):\?[^}]+\}`)
 
 // service traz as chaves que um serviço do compose pode usar. O loadCompose lê com
-// KnownFields: qualquer outra reprova, como `user` (o uid é o da imagem, §2), `env_file`
-// (entregaria o .env inteiro), `privileged`, `cap_add`, `devices`, `pid` e `volumes_from`.
+// KnownFields: qualquer outra reprova, como `user` (o uid é o da imagem, §2), `command` (vale
+// o CMD da imagem; o do RAG migra o banco antes de servir), `env_file` (entregaria o .env
+// inteiro), `privileged`, `cap_add`, `devices`, `pid` e `volumes_from`.
 type service struct {
 	Build, Image    string
-	Command         []string
 	Environment     map[string]string
 	Volumes, Tmpfs  []string
 	Ports, Networks []string
@@ -154,8 +154,6 @@ func TestCompose(t *testing.T) {
 	assert.Contains(t, strings.Join(db.Healthcheck.Test, " "), "pg_isready -h 127.0.0.1 ", "saúde pelo TCP, não pelo socket do initdb")
 	assert.Equal(t, "postgresql+asyncpg://brain:"+pw+"@db:5432/brain", rag.Environment["DATABASE_URL"])
 	assert.Equal(t, "http://gateway:8080", rag.Environment["GATEWAY_URL"])
-	assert.Equal(t, []string{"uvicorn", "app.api.server:create_server", "--factory", "--host", "0.0.0.0", "--port", "8000"},
-		rag.Command, "a fábrica do RAG que põe o banco no /healthz")
 	assert.Equal(t, "service_healthy", rag.DependsOn["db"].Condition)
 	for _, name := range []string{"rag", "studio"} {
 		assert.Equal(t, []string{"/tmp"}, p.Services[name].Tmpfs, "%s: /tmp gravável com a raiz só leitura", name)
@@ -174,7 +172,7 @@ func TestCompose(t *testing.T) {
 	assert.ElementsMatch(t, []string{"POSTGRES_PASSWORD", "OPENROUTER_API_KEY", "FLOW_OPENROUTER_API_KEY"}, keys)
 	secrets := map[string][]string{"gateway": {"FLOW_OPENROUTER_API_KEY"}, "rag": {"POSTGRES_PASSWORD", "OPENROUTER_API_KEY"}, "db": {"POSTGRES_PASSWORD"}}
 	for name, s := range p.Services {
-		// O serviço inteiro, não só o environment: um segredo no command também chega ao container.
+		// O serviço inteiro, não só o environment: um segredo no healthcheck também chega ao container.
 		out, err := yaml.Marshal(s)
 		require.NoError(t, err)
 		var got []string
@@ -200,8 +198,8 @@ func stack(t *testing.T) func(args ...string) string {
 
 // TestStackServes sonda as portas do host e, pela origem do estúdio (§5), o nginx dele
 // chegando a gateway, RAG e cache pelos nomes DNS do compose (502 se não chega). O
-// /healthz do RAG só dá 200 com o Postgres respondendo (a fábrica do `command`), e o corpo
-// traz a checagem do banco: a fábrica sem banco também dá 200, com `checks` vazio.
+// /healthz do RAG só dá 200 com o Postgres respondendo (a fábrica do CMD da imagem), e o
+// corpo traz a checagem do banco: a fábrica sem banco também dá 200, com `checks` vazio.
 func TestStackServes(t *testing.T) {
 	stack(t)
 	client := &http.Client{Timeout: 5 * time.Second}
@@ -219,6 +217,24 @@ func TestStackServes(t *testing.T) {
 			assert.Contains(t, string(body), want, "%s: o RAG com o banco", url)
 		}
 	}
+}
+
+// ragHead imprime a head das migrações instaladas na imagem do RAG, que não leva o
+// alembic.ini (a mesma conta do app/smoke.py do brain-router-py).
+const ragHead = "from alembic.config import Config; from alembic.script import ScriptDirectory; " +
+	"c = Config(); c.set_main_option('script_location', 'app:migrations'); " +
+	"print(ScriptDirectory.from_config(c).get_current_head())"
+
+// TestStackRagMigrated confere que a partida do RAG migrou o banco do compose até a head da
+// própria imagem. Sem a migração (um `command` que pula o `brain-router migrate`), o /healthz
+// fica verde, porque só pinga o Postgres, mas upload e busca não acham as tabelas: aqui o
+// psql sai com erro, sem a tabela alembic_version.
+func TestStackRagMigrated(t *testing.T) {
+	compose := stack(t)
+	head := compose("exec", "-T", "rag", "python", "-I", "-c", ragHead)
+	version := compose("exec", "-T", "db", "psql", "-U", "brain", "-d", "brain", "-tAc", "SELECT version_num FROM alembic_version")
+	assert.Equal(t, head, version, "o banco do compose na head das migrações da imagem do RAG")
+	t.Logf("alembic_version no banco: %q; head da imagem: %q", version, head)
 }
 
 // TestStackCacheSocket pinga o cache (§3) pelo socket que o gateway enxerga: um container

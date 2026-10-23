@@ -6,14 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net/http"
 	"os"
 	"os/exec"
 	"path"
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -103,41 +101,6 @@ func TestImageFiles(t *testing.T) {
 	assert.True(t, bin.Uid == 0 && bin.Mode&0o022 == 0, "binário do root e sem escrita para os outros: uid %d, modo %o", bin.Uid, bin.Mode)
 	for name := range files {
 		assert.NotContains(t, []string{"sh", "bash", "ash", "dash", "busybox"}, path.Base(name), "contrato §2: shell na imagem final em /%s", name)
-	}
-}
-
-// TestImageServesLivez sobe o container endurecido (raiz só leitura, sem
-// capabilities) e confere o uid do processo de verdade e o /livez pela porta 8080.
-func TestImageServesLivez(t *testing.T) {
-	img := image(t)
-	id := docker(t, "run", "-d", "--read-only", "--cap-drop=ALL", "--security-opt=no-new-privileges", "-p", "127.0.0.1::8080", img)
-	t.Cleanup(func() {
-		if t.Failed() {
-			logs, _ := exec.Command("docker", "logs", id).CombinedOutput()
-			t.Logf("log do container:\n%s", logs)
-		}
-		_ = exec.Command("docker", "rm", "-f", id).Run()
-	})
-
-	// O docker top lê o ps do host: é o uid do processo, não o USER da config.
-	top := strings.Split(docker(t, "top", id, "-eo", "uid,pid"), "\n")
-	require.Len(t, top, 2, "um processo só no container: %q", top)
-	assert.Equal(t, "65532", strings.Fields(top[1])[0], "uid do processo")
-
-	addr := strings.Split(docker(t, "port", id, "8080/tcp"), "\n")[0]
-	client := &http.Client{Timeout: 5 * time.Second}
-	deadline := time.Now().Add(30 * time.Second)
-	for {
-		res, err := client.Get("http://" + addr + "/livez")
-		if err == nil {
-			body, _ := io.ReadAll(res.Body)
-			res.Body.Close()
-			assert.Equal(t, http.StatusOK, res.StatusCode)
-			assert.Contains(t, string(body), `"status":"ok"`)
-			return
-		}
-		require.True(t, time.Now().Before(deadline), "/livez sem resposta em 30 s: %v", err)
-		time.Sleep(200 * time.Millisecond)
 	}
 }
 

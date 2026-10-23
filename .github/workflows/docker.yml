@@ -1,7 +1,9 @@
 name: docker
 
 # Imagem do gateway (Dockerfile na raiz): lint, build sem push e os testes de
-# test/docker contra a imagem construída (< 20 MB, uid 65532, /livez, sem shell).
+# test/docker contra a imagem construída (< 20 MB, uid 65532, sem shell e o smoke: rotas
+# de saúde, /metrics e SIGTERM no container). As regras do job image estão no
+# TestDockerWorkflow.
 on:
   push:
     branches: [main]
@@ -13,6 +15,10 @@ permissions:
 concurrency:
   group: docker-${{ github.ref }}
   cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash # com pipefail (sem `shell:`, o Actions roda `bash -e` sem ele)
 
 jobs:
   hadolint:
@@ -47,4 +53,8 @@ jobs:
       - name: testes da imagem
         env:
           GATEWAY_IMAGE_VERSION: flow-gateway dev (${{ github.sha }})
-        run: go test -count=1 -v -run '^TestImage' ./test/docker/
+        # Sem GATEWAY_IMAGE os TestImage* pulam: o grep reprova o SKIP e o -run que não acha o smoke.
+        run: |
+          go test -count=1 -v -run '^TestImage' ./test/docker/ | tee "$RUNNER_TEMP/image.log"
+          if grep -- '--- SKIP' "$RUNNER_TEMP/image.log"; then exit 1; fi
+          grep -q '^--- PASS: TestImageSmoke ' "$RUNNER_TEMP/image.log"

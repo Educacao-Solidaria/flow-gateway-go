@@ -72,6 +72,7 @@ func TestConfig(t *testing.T) {
 	type step struct {
 		Uses, Run string
 		With      map[string]any
+		Env       map[string]string
 	}
 	var wf struct {
 		On          map[string]any `yaml:"on"`
@@ -94,6 +95,9 @@ func TestConfig(t *testing.T) {
 	assert.Equal(t, "github.ref_type == 'tag'", pub.If)
 	assert.Equal(t, map[string]string{"contents": "write"}, pub.Permissions, "o único job com escrita")
 	assert.Empty(t, wf.Jobs["snapshot"].Permissions, "o snapshot herda o contents: read")
+	assert.True(t, slices.ContainsFunc(wf.Jobs["snapshot"].Steps, func(s step) bool {
+		return s.Env["RELEASE_DIST"] != "" && strings.Contains(s.Run, "grep -q '^--- PASS: TestSnapshot '")
+	}), "snapshot: o TestSnapshot roda com RELEASE_DIST, e o grep reprova o teste pulado")
 	for name, job := range wf.Jobs {
 		assert.Positive(t, job.TimeoutMinutes, "%s: timeout-minutes", name)
 		var runs []string

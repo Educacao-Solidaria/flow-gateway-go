@@ -48,8 +48,6 @@ jobs:
       - run: goreleaser check
       - run: goreleaser release --snapshot --clean
       - name: testes do dist/
-        env:
-          RELEASE_DIST: dist
         # O grep reprova também o teste que pula (sem RELEASE_DIST) ou que o -run não acha.
         run: |
           go test -count=1 -timeout 2m -v -run '^TestSnapshot$' ./test/release/ | tee "$RUNNER_TEMP/snapshot.log"

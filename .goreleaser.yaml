@@ -25,7 +25,10 @@ builds:
     goarch: [amd64, arm64]
 
 archives:
-  - format_overrides:
+  # Só o binário e o README. Sem files, o goreleaser leva também LICENSE*, CHANGELOG* e afins
+  # da raiz: um CHANGELOG.md novo (o da v1.0.0 é o PR 100) mudaria os pacotes da tag.
+  - files: [README.md]
+    format_overrides:
       - goos: windows
         formats: [zip]
 

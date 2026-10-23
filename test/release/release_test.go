@@ -32,14 +32,15 @@ const root = "../.."
 // module é o caminho do módulo: o binário é o module/cmd/flow-gateway.
 const module = "github.com/Educacao-Solidaria/flow-gateway-go"
 
-// decode lê o YAML name da raiz em v; com strict, chave que v não declara reprova.
-func decode(t *testing.T, name string, v any, strict bool) {
+// decode lê o YAML name da raiz em v e devolve o texto; com strict, chave que v não declara reprova.
+func decode(t *testing.T, name string, v any, strict bool) string {
 	t.Helper()
 	data, err := os.ReadFile(filepath.Join(root, name))
 	require.NoError(t, err)
 	dec := yaml.NewDecoder(bytes.NewReader(data))
 	dec.KnownFields(strict)
 	require.NoError(t, dec.Decode(v), name)
+	return string(data)
 }
 
 // platforms devolve os alvos do `make cross` (PLATFORMS no Makefile): a release empacota os mesmos.
@@ -53,16 +54,26 @@ func platforms(t *testing.T) []string {
 }
 
 // TestConfig confere o .goreleaser.yaml e o release.yml contra o contrato da Fase 5 (§6): só a
-// tag v* publica, só na release do GitHub deste repositório e só no job que tem escrita.
+// tag v* publica, só na release do GitHub deste repositório, só no job que tem escrita e com o
+// token só no passo que publica.
 func TestConfig(t *testing.T) {
 	// Seções conhecidas (KnownFields): qualquer outra (dockers, brews, nfpms, blobs, publishers,
-	// announce, os hooks do before) reprova até entrar aqui. Na release, só o prerelease: um
-	// github: apontaria outro repositório, um extra_files subiria outros arquivos.
+	// announce, os hooks do before) reprova até entrar aqui. Também os campos de cada build e de
+	// cada pacote: um hooks, tool ou gobinary rodaria outro programa no job que tem o token. Na
+	// release, só o prerelease: um github: apontaria outro repositório, um extra_files subiria
+	// outros arquivos.
 	var cfg struct {
-		Version          int
-		ProjectName      string `yaml:"project_name"`
-		Builds, Archives any
-		Release          struct{ Prerelease string }
+		Version     int
+		ProjectName string `yaml:"project_name"`
+		Builds      []struct {
+			Main                              string
+			Env, Flags, Ldflags, Goos, Goarch []string
+		}
+		Archives []struct {
+			Files           []string
+			FormatOverrides any `yaml:"format_overrides"`
+		}
+		Release struct{ Prerelease string }
 	}
 	decode(t, ".goreleaser.yaml", &cfg, true)
 	assert.Equal(t, 2, cfg.Version)
@@ -84,7 +95,7 @@ func TestConfig(t *testing.T) {
 			Steps          []step
 		}
 	}
-	decode(t, ".github/workflows/release.yml", &wf, false)
+	raw := decode(t, ".github/workflows/release.yml", &wf, false)
 	assert.Equal(t, map[string]any{"push": map[string]any{"tags": []any{"v*"}}, "pull_request": nil}, wf.On,
 		"disparo: a tag v* (que publica) e o PR (que só prova)")
 	assert.Equal(t, map[string]string{"contents": "read"}, wf.Permissions)
@@ -98,6 +109,7 @@ func TestConfig(t *testing.T) {
 	assert.True(t, slices.ContainsFunc(wf.Jobs["snapshot"].Steps, func(s step) bool {
 		return s.Env["RELEASE_DIST"] != "" && strings.Contains(s.Run, "grep -q '^--- PASS: TestSnapshot '")
 	}), "snapshot: o TestSnapshot roda com RELEASE_DIST, e o grep reprova o teste pulado")
+	installs := map[string]string{} // job -> passo que baixa o goreleaser
 	for name, job := range wf.Jobs {
 		assert.Positive(t, job.TimeoutMinutes, "%s: timeout-minutes", name)
 		var runs []string
@@ -112,6 +124,9 @@ func TestConfig(t *testing.T) {
 			if strings.HasPrefix(s.Run, "goreleaser ") {
 				runs = append(runs, s.Run)
 			}
+			if strings.Contains(s.Run, "goreleaser.tgz") {
+				installs[name] = s.Run
+			}
 		}
 		want := []string{"goreleaser check", "goreleaser release --snapshot --clean"}
 		if name == "publish" {
@@ -119,6 +134,16 @@ func TestConfig(t *testing.T) {
 		}
 		assert.Equal(t, want, runs, "%s: chamadas do goreleaser", name)
 	}
+	// O publish, que só roda na tag, instala o goreleaser como o snapshot, que roda em todo PR.
+	assert.Contains(t, installs["snapshot"], "sha256sum -c", "goreleaser com o SHA-256 conferido")
+	assert.Equal(t, installs["snapshot"], installs["publish"], "publish: instalação do goreleaser")
+	// O token: uma referência no arquivo (nem no env do topo ou do job, nem num with:), no env do
+	// passo que publica, e nenhum segredo.
+	assert.Equal(t, 1, strings.Count(raw, "github.token"), "uma referência ao token")
+	assert.NotContains(t, raw, "secrets.")
+	assert.True(t, slices.ContainsFunc(pub.Steps, func(s step) bool {
+		return s.Run == "goreleaser release --clean" && s.Env["GITHUB_TOKEN"] == "${{ github.token }}"
+	}), "o token no env do passo que publica")
 }
 
 // TestSnapshot confere o dist/ de um `goreleaser release --snapshot`: um pacote por alvo do

@@ -19,7 +19,7 @@ import (
 )
 
 func main() {
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGHUP)
 	err := run(ctx, os.Args[1:], os.Stdout)
 	stop()
 	if err != nil {

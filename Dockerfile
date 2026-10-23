@@ -27,5 +27,6 @@ FROM gcr.io/distroless/static-debian12:nonroot@sha256:afa5c872c891853ca7fcf1f12c
 # O binário fica do root (0755): o processo não reescreve o próprio executável.
 COPY --from=build /out/flow-gateway /usr/local/bin/flow-gateway
 USER 65532:65532
+ENV FLOW_SERVER_ADDR=:9090
 EXPOSE 8080
 ENTRYPOINT ["/usr/local/bin/flow-gateway"]

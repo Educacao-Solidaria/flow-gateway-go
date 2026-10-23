@@ -11,6 +11,7 @@ import (
 	"github.com/spf13/pflag"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.yaml.in/yaml/v3"
 
 	"github.com/Educacao-Solidaria/flow-gateway-go/internal/config"
 )
@@ -78,6 +79,7 @@ func TestDockerfile(t *testing.T) {
 
 	assert.True(t, strings.HasPrefix(final[0].args, "gcr.io/distroless/static-debian12:nonroot@"), "imagem final: %s", final[0].args)
 	assert.Equal(t, []string{"65532:65532"}, values(final, "USER"), "contrato §2: usuário numérico 65532:65532")
+	assert.Empty(t, values(final, "STOPSIGNAL"), "sem STOPSIGNAL, o docker stop e o compose mandam o SIGTERM do smoke")
 	var entry []string
 	require.NoError(t, json.Unmarshal([]byte(strings.Join(values(final, "ENTRYPOINT"), "")), &entry), "ENTRYPOINT em forma exec: a distroless não tem shell")
 	assert.Equal(t, []string{"/usr/local/bin/flow-gateway"}, entry)
@@ -119,4 +121,41 @@ func TestDockerignore(t *testing.T) {
 		}
 	}
 	assert.Subset(t, rules[lastAllow+1:], []string{"**/.env", "**/.env.*"}, "segredo local fica fora até dentro das pastas liberadas")
+}
+
+// TestDockerWorkflow confere o job image do docker.yml: os TestImage* rodam na imagem que o
+// próprio job constrói, com pipefail, e o teste que pula reprova (sem GATEWAY_IMAGE, todos
+// pulariam com o job verde).
+func TestDockerWorkflow(t *testing.T) {
+	var wf struct {
+		Defaults struct{ Run struct{ Shell string } }
+		Jobs     map[string]struct {
+			Env   map[string]string
+			Steps []struct {
+				Run  string
+				With map[string]any
+			}
+		}
+	}
+	data, err := os.ReadFile(filepath.Join(root, ".github", "workflows", "docker.yml"))
+	require.NoError(t, err)
+	require.NoError(t, yaml.Unmarshal([]byte(strings.ReplaceAll(string(data), "\r", "")), &wf))
+	assert.Equal(t, "bash", wf.Defaults.Run.Shell, "pipefail: o `go test | tee` reprova junto com o teste")
+	job := wf.Jobs["image"]
+	assert.Equal(t, "educacao-solidaria/flow-gateway:dev", job.Env["GATEWAY_IMAGE"], "contrato §2: a tag local")
+	var tags []any
+	var tests []string
+	for _, s := range job.Steps {
+		if tag, ok := s.With["tags"]; ok {
+			tags = append(tags, tag)
+		}
+		if strings.Contains(s.Run, "go test") {
+			tests = append(tests, s.Run)
+		}
+	}
+	assert.Equal(t, []any{"${{ env.GATEWAY_IMAGE }}"}, tags, "o teste roda na imagem que o job constrói")
+	assert.Equal(t, []string{`go test -count=1 -v -run '^TestImage' ./test/docker/ | tee "$RUNNER_TEMP/image.log"
+if grep -- '--- SKIP' "$RUNNER_TEMP/image.log"; then exit 1; fi
+grep -q '^--- PASS: TestImageSmoke ' "$RUNNER_TEMP/image.log"
+`}, tests, "o smoke roda e o teste que pula reprova")
 }

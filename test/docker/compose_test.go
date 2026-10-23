@@ -84,6 +84,12 @@ func loadCompose(t *testing.T) (project, string) {
 func TestCompose(t *testing.T) {
 	p, raw := loadCompose(t)
 	assert.Equal(t, "educacao-solidaria", p.Name)
+	// O `up` na pasta e sem -f (o do cabeçalho do compose e o do compose.yml) junta sozinho um
+	// override ao lado, por cima de tudo o que este teste confere: um `command` no rag, por
+	// exemplo, voltaria a pular a migração.
+	for _, name := range []string{"compose.override.yaml", "compose.override.yml", "docker-compose.override.yaml", "docker-compose.override.yml"} {
+		assert.NoFileExists(t, filepath.Join(root, composeDir, name), "o compose efetivo é só o compose.yaml")
+	}
 
 	// Por serviço: a imagem (§2), o build na raiz de cada repo lado a lado (§1; relativo à raiz
 	// deste), a porta no host só no loopback (§4), as redes (banco e cache só na interna) e os

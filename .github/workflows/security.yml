@@ -40,9 +40,12 @@ jobs:
       - uses: actions/checkout@v5
         with:
           persist-credentials: false
+      # ponytail: o gosec v2.29.0 (x/tools v0.49.0) lê o export data do Go só até a versão 4,
+      # e o Go 1.27.3 grava a 5: com `stable` o job quebra em "export data version 5". O Go
+      # 1.26 grava a 2. Quando sair um gosec com x/tools v0.50+, suba os dois e volte a stable.
       - uses: actions/setup-go@v6
         with:
-          go-version: stable
+          go-version: '1.26'
       # O go install confere o módulo no sum.golang.org; compilado pelo Go do job, o gosec
       # entende a stdlib que vai analisar.
       - name: instalar o gosec

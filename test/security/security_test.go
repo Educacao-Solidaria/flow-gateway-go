@@ -149,7 +149,7 @@ func nosecProblems(src string) ([]string, error) {
 	for _, g := range f.Comments {
 		var note []string
 		for _, c := range g.List {
-			line := strings.TrimSpace(strings.TrimPrefix(c.Text, "//"))
+			line := strings.TrimSpace(strings.TrimLeft(c.Text, "/*")) // `//` e `/* */`, como o gosec
 			if len(note) > 0 || strings.HasPrefix(line, "#nosec") || strings.HasPrefix(line, "gosec:disable") {
 				note = append(note, line)
 			}
@@ -189,6 +189,7 @@ func TestExceptionRules(t *testing.T) {
 		"// #nosec G404 -- id que não é segredo. Revisar em 2027-01-22.",
 		"// #nosec G115 G404 -- motivo que ocupa\n// duas linhas. Revisar em 2027-01-22.",
 		"//gosec:disable G404 -- motivo, revisar em 2027-01-22",
+		"/* #nosec G404 -- motivo, revisar em 2027-01-22 */",
 		"// prosa que cita um #nosec no meio não é anotação",
 	} {
 		assert.Empty(t, nosec(good), good)
@@ -200,6 +201,7 @@ func TestExceptionRules(t *testing.T) {
 		"// #nosec G404 -- sem data",
 		"// #nosec G404 -- revisar em 2027-02-30",
 		"//gosec:disable G404 -- sem data",
+		"/* #nosec G404 -- sem data */",
 		"// explicação antes\n// #nosec G404 -- sem data",
 	} {
 		assert.Len(t, nosec(bad), 1, bad)

@@ -75,6 +75,7 @@ release-snapshot: ## release em dist/ sem publicar e os testes dos pacotes, como
 	goreleaser release --snapshot --clean
 	RELEASE_DIST=dist go test -count=1 -timeout 2m -run '^TestSnapshot$$' ./test/release/
 
+# O gosec v2.29.0 não lê o export data do Go 1.27.3: compile e rode com o Go 1.26, como o CI.
 audit: ## gosec e trivy fs como o CI (precisa dos dois no PATH; o trivy image fica com o CI)
 	gosec -terse -severity high -nosec-require-rules -nosec-require-justification ./...
 	trivy fs --scanners vuln,secret,misconfig --severity HIGH,CRITICAL --ignore-unfixed --ignorefile .trivyignore --show-suppressed --exit-code 1 .

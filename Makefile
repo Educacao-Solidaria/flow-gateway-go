@@ -13,7 +13,7 @@ os   = $(word 1,$(subst /, ,$1))
 arch = $(word 2,$(subst /, ,$1))
 
 .DEFAULT_GOAL := help
-.PHONY: help build run test race cover lint fmt fmt-check tidy check cross build-linux build-darwin build-windows docker docker-test compose compose-test clean $(PLATFORMS)
+.PHONY: help build run test race cover lint fmt fmt-check tidy check cross build-linux build-darwin build-windows docker docker-test compose compose-test release-snapshot clean $(PLATFORMS)
 
 help: ## lista os targets disponíveis
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z_-]+:.*## / {printf "  %-14s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -69,6 +69,11 @@ compose: ## sobe o ecossistema do deploy/compose (os 4 repos lado a lado e o .en
 
 compose-test: ## sonda o ecossistema já de pé como o CI
 	COMPOSE_STACK=1 go test -count=1 -run '^TestStack' ./test/docker/
+
+release-snapshot: ## release em dist/ sem publicar e os testes dos pacotes, como o CI (precisa do goreleaser)
+	goreleaser check
+	goreleaser release --snapshot --clean
+	RELEASE_DIST=dist go test -count=1 -timeout 2m -run '^TestSnapshot$$' ./test/release/
 
 clean: ## remove artefatos de build
 	rm -rf bin $(DIST) coverage.out

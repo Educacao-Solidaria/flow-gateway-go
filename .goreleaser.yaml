@@ -1,0 +1,34 @@
+# yaml-language-server: $schema=https://goreleaser.com/static/schema.json
+#
+# Release do flow-gateway (contrato da Fase 5, §6): os binários de linux, darwin e windows
+# em amd64 e arm64 (os mesmos alvos do `make cross`), num .tar.gz por alvo (.zip no
+# windows), e o arquivo de checksums SHA-256 de todos os pacotes.
+#   make release-snapshot   (goreleaser check + release --snapshot + os testes do dist/)
+# Só a tag v* publica, pelo workflow release.yml. As regras deste arquivo estão em
+# test/release: uma seção nova (dockers, brews, blobs, announce...) reprova lá.
+version: 2
+
+project_name: flow-gateway
+
+builds:
+  - main: ./cmd/flow-gateway
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    # O -X do Makefile. A versão leva o "v" da tag (v1.2.3), como o `git describe`.
+    ldflags:
+      - -s -w
+      - -X github.com/Educacao-Solidaria/flow-gateway-go/internal/version.Version=v{{ .Version }}
+      - -X github.com/Educacao-Solidaria/flow-gateway-go/internal/version.Commit={{ .ShortCommit }}
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+
+archives:
+  - format_overrides:
+      - goos: windows
+        formats: [zip]
+
+release:
+  # v1.0.0-rc.1 sai como pré-release.
+  prerelease: auto

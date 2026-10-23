@@ -19,7 +19,7 @@ builds:
     # O -X do Makefile. A versão leva o "v" da tag (v1.2.3), como o `git describe`.
     ldflags:
       - -s -w
-      - -X github.com/Educacao-Solidaria/flow-gateway-go/internal/version.Version=v{{ .Version }}
+      - -X github.com/Educacao-Solidaria/flow-gateway-go/internal/versio.Version=v{{ .Version }}
       - -X github.com/Educacao-Solidaria/flow-gateway-go/internal/version.Commit={{ .ShortCommit }}
     goos: [linux, darwin, windows]
     goarch: [amd64, arm64]

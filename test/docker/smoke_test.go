@@ -85,6 +85,7 @@ func smoke(t *testing.T, gw gateway, env []string) {
 	}
 
 	code, took := gw.term()
+	t.Logf("SIGTERM: saída %d em %s", code, took)
 	assert.Equal(t, 0, code, "saída depois do SIGTERM")
 	assert.Less(t, took, stopGrace, "o SIGTERM encerra antes do SIGKILL do docker stop")
 	logs := gw.logs()

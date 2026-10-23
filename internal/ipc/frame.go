@@ -84,15 +84,17 @@ func Append(dst []byte, f Frame) ([]byte, error) {
 	if f.Flags != 0 {
 		return dst, fmt.Errorf("ipc: flags %#04x: a v1 não define nenhum bit", f.Flags)
 	}
-	if len(f.Payload) > MaxPayload {
-		return dst, fmt.Errorf("ipc: payload de %d bytes acima do teto de %d", len(f.Payload), MaxPayload)
+	// n numa variável: é por ela que o gosec (G115) prova que o uint32(n) abaixo não trunca.
+	n := len(f.Payload)
+	if n > MaxPayload {
+		return dst, fmt.Errorf("ipc: payload de %d bytes acima do teto de %d", n, MaxPayload)
 	}
 	start := len(dst)
 	dst = append(dst, magic...)
 	dst = append(dst, Version, byte(f.Kind))
 	dst = binary.BigEndian.AppendUint16(dst, f.Flags)
 	dst = binary.BigEndian.AppendUint32(dst, f.RequestID)
-	dst = binary.BigEndian.AppendUint32(dst, uint32(len(f.Payload)))
+	dst = binary.BigEndian.AppendUint32(dst, uint32(n))
 	dst = append(dst, f.Payload...)
 	return binary.BigEndian.AppendUint32(dst, crc32.ChecksumIEEE(dst[start:])), nil
 }

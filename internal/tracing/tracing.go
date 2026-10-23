@@ -111,6 +111,8 @@ var randRead = rand.Read
 // randomID enche b de bytes aleatórios, nunca todos zero (id inválido na spec).
 func randomID(b []byte) {
 	for {
+		// #nosec G115 G404 -- fallback do id (abaixo), que não é segredo; o byte() trunca de
+		// propósito. Revisar em 2027-01-22, com a decisão de subir o go.mod: no Go 1.24+ ele sai.
 		if _, err := randRead(b); err != nil {
 			// Antes do Go 1.24 crypto/rand.Read pode falhar (o go.mod aceita
 			// 1.23). Id de trace não é segredo: math/rand/v2 basta.

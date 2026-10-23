@@ -1,0 +1,90 @@
+name: security
+
+# Auditoria de segurança do gateway (contrato da Fase 5, §6), em push na main e em PR. Reprova
+# achado HIGH/CRITICAL com correção disponível (o gosec vai só até HIGH):
+# - gosec: análise estática do código Go, sem os _test.go (o padrão do gosec);
+# - trivy fs: as dependências do go.mod, segredos no repositório e o Dockerfile;
+# - trivy image: a imagem do docker.yml, com os pacotes da distroless e o binário (a stdlib do
+#   Go que o compilou e os módulos linkados).
+# Exceção só com motivo e data de revisão: `#nosec G### -- motivo` no código ou o .trivyignore
+# (cujo `exp:` vence sozinho). As regras deste arquivo estão em test/security.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash # com pipefail (sem `shell:`, o Actions roda `bash -e` sem ele)
+
+env:
+  GOSEC_VERSION: v2.29.0
+  TRIVY_VERSION: 0.75.0
+  TRIVY_SHA256: c6e65abddb348e25f10549df887045629cf28cc72453cd1c63acb717316b3f3f
+  # O trivy não manda uso anônimo para a Aqua nem procura versão nova.
+  TRIVY_DISABLE_TELEMETRY: 'true'
+  TRIVY_SKIP_VERSION_CHECK: 'true'
+
+jobs:
+  gosec:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      # ponytail: o gosec v2.29.0 (x/tools v0.49.0) lê o export data do Go só até a versão 4,
+      # e o Go 1.27.3 grava a 5: com `stable` o job quebra em "export data version 5". O Go
+      # 1.26 grava a 2. Quando sair um gosec com x/tools v0.50+, suba os dois e volte a stable.
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.26'
+      # O go install confere o módulo no sum.golang.org; compilado pelo Go do job, o gosec
+      # entende a stdlib que vai analisar.
+      - name: instalar o gosec
+        run: go install "github.com/securego/gosec/v2/cmd/gosec@$GOSEC_VERSION"
+      # Todo #nosec tem de citar a regra (G###) e trazer o motivo depois de "--".
+      - name: gosec
+        run: gosec -terse -severity high -nosec-require-rules -nosec-require-justification ./...
+
+  trivy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GATEWAY_IMAGE: educacao-solidaria/flow-gateway:dev
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - name: instalar o trivy
+        run: |
+          curl -fsSLo "$RUNNER_TEMP/trivy.tgz" "https://github.com/aquasecurity/trivy/releases/download/v$TRIVY_VERSION/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
+          echo "$TRIVY_SHA256  $RUNNER_TEMP/trivy.tgz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/trivy.tgz" -C "$RUNNER_TEMP" trivy
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+      - name: trivy fs (go.mod, segredos e Dockerfile)
+        run: trivy fs --scanners vuln,secret,misconfig --severity HIGH,CRITICAL --ignore-unfixed --ignorefile .trivyignore --show-suppressed --exit-code 1 .
+      # Daqui em diante roda mesmo com o fs vermelho: o relatório sai inteiro numa volta só.
+      - uses: docker/setup-buildx-action@v4
+        if: ${{ !cancelled() }}
+      - name: build da imagem (sem push)
+        if: ${{ !cancelled() }}
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: false
+          load: true
+          provenance: false
+          tags: ${{ env.GATEWAY_IMAGE }}
+          build-args: COMMIT=${{ github.sha }} # os mesmos do docker.yml: reaproveita o cache dele
+          cache-from: type=gha
+      - name: trivy image (distroless e o binário)
+        if: ${{ !cancelled() }}
+        run: trivy image --scanners vuln,secret --severity HIGH,CRITICAL --ignore-unfixed --ignorefile .trivyignore --show-suppressed --exit-code 1 "$GATEWAY_IMAGE"

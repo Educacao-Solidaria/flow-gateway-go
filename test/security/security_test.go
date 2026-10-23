@@ -74,11 +74,18 @@ func TestWorkflow(t *testing.T) {
 	assert.Regexp(t, `^\d+\.\d+\.\d+$`, wf.Env["TRIVY_VERSION"], "trivy numa versão exata")
 	assert.Regexp(t, `^[0-9a-f]{64}$`, wf.Env["TRIVY_SHA256"])
 	assert.Equal(t, "true", wf.Env["TRIVY_DISABLE_TELEMETRY"], "o trivy não manda uso para a Aqua")
+	// O trivy lê TRIVY_* do ambiente (um TRIVY_SKIP_DIRS ou TRIVY_IGNORE_POLICY afrouxaria o portão
+	// sem mudar o comando) e o go lê GOFLAGS: o ambiente fica nestas chaves e no GATEWAY_IMAGE.
+	assert.ElementsMatch(t, []string{"GOSEC_VERSION", "TRIVY_VERSION", "TRIVY_SHA256", "TRIVY_DISABLE_TELEMETRY",
+		"TRIVY_SKIP_VERSION_CHECK"}, slices.Collect(maps.Keys(wf.Env)))
+	// Um shell como `bash -c "exit 0" {0}` faria todo run: passar.
+	assert.Equal(t, map[string]any{"run": map[string]any{"shell": "bash"}}, wf.Defaults)
 	require.ElementsMatch(t, []string{"gosec", "trivy"}, slices.Collect(maps.Keys(wf.Jobs)))
 
 	runs := map[string][]string{} // job -> scripts, na ordem
 	for name, job := range wf.Jobs {
 		assert.Positive(t, job.TimeoutMinutes, "%s: timeout-minutes", name)
+		assert.Subset(t, []string{"GATEWAY_IMAGE"}, slices.Collect(maps.Keys(job.Env)), "%s: env do job", name)
 		for _, s := range job.Steps {
 			assert.NotContains(t, s.Run, "${{", "%s: contexto entra no script só por env:", name)
 			// Um `if: false` (ou só no push) pularia o portão no PR sem ninguém ver.

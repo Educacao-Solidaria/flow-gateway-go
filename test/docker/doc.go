@@ -11,7 +11,8 @@
 //	GATEWAY_IMAGE=educacao-solidaria/flow-gateway:dev go test -count=1 -run '^TestImage' ./test/docker/
 //
 // Os TestStack* sondam o ecossistema já de pé (`make compose`; sem COMPOSE_STACK,
-// pulam); o workflow compose.yml sobe os 4 repositórios lado a lado e roda:
+// pulam), inclusive a migração do banco pela partida do RAG; o workflow compose.yml sobe os
+// 4 repositórios lado a lado e roda, reprovando o teste que pula:
 //
 //	COMPOSE_STACK=1 go test -count=1 -run '^TestStack' ./test/docker/
 package docker

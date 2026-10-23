@@ -27,6 +27,7 @@ jobs:
     defaults:
       run:
         working-directory: flow-gateway-go/deploy/compose
+        shell: bash # com pipefail (sem `shell:`, o Actions roda `bash -e` sem ele)
     steps:
       - uses: actions/checkout@v5
         with:
@@ -101,7 +102,11 @@ jobs:
         working-directory: flow-gateway-go
         env:
           COMPOSE_STACK: "1"
-        run: go test -count=1 -v -run '^TestStack' ./test/docker/
+        # Sem COMPOSE_STACK os TestStack* pulam: o grep reprova o SKIP e o -run que não acha a migração.
+        run: |
+          go test -count=1 -v -run '^TestStack' ./test/docker/ | tee "$RUNNER_TEMP/stack.log"
+          if grep -- '--- SKIP' "$RUNNER_TEMP/stack.log"; then exit 1; fi
+          grep -q '^--- PASS: TestStackRagMigrated ' "$RUNNER_TEMP/stack.log"
       - name: estado e logs dos containers
         if: failure()
         run: docker compose ps -a && docker compose logs --no-color

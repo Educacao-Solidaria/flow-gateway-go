@@ -145,7 +145,7 @@ func TestImageSmoke(t *testing.T) {
 	hardened := []string{"--read-only", "--cap-drop=ALL", "--security-opt=no-new-privileges"}
 	for name, env := range configs {
 		t.Run(name, func(t *testing.T) {
-			args := append(append([]string{"run", "-d", "-p", "127.0.0.1::8080"}, map[string][]string{"padrão": {"--user=0:0", "--workdir=/"}, "production": {"--user=0:0"}}[name]...), hardened...)
+			args := append([]string{"run", "-d", "-p", "127.0.0.1::8080"}, hardened...)
 			for _, kv := range env {
 				args = append(args, "-e", kv)
 			}

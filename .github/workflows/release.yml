@@ -1,0 +1,83 @@
+name: release
+
+# Binários do gateway pelo GoReleaser (.goreleaser.yaml; contrato da Fase 5, §6). O job
+# snapshot roda no PR e antes de toda publicação: `goreleaser check`, `release --snapshot`
+# (os 6 alvos, os pacotes e o checksums, sem publicar nada) e o TestSnapshot sobre o dist/.
+# Só a tag v* publica a release do GitHub, no único job com contents: write. As regras
+# deste arquivo estão em test/release.
+on:
+  push:
+    tags: ['v*']
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  # Push novo no PR cancela a rodada velha; a publicação de uma tag nunca é cortada no meio.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+defaults:
+  run:
+    shell: bash # com pipefail (sem `shell:`, o Actions roda `bash -e` sem ele)
+
+env:
+  GORELEASER_VERSION: v2.18.3
+  GORELEASER_SHA256: b8dee4728bca1aba0d71a832a17cd0a3799f75372878e7ffa36aef2343bce0bc
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0 # tags e histórico: a versão sai da última tag
+          persist-credentials: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version: stable
+          cache: false # workflow que publica: nenhum job restaura cache (o snapshot também roda na tag)
+      - name: instalar o goreleaser
+        run: |
+          curl -fsSLo "$RUNNER_TEMP/goreleaser.tgz" "https://github.com/goreleaser/goreleaser/releases/download/$GORELEASER_VERSION/goreleaser_Linux_x86_64.tar.gz"
+          echo "$GORELEASER_SHA256  $RUNNER_TEMP/goreleaser.tgz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/goreleaser.tgz" -C "$RUNNER_TEMP" goreleaser
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+      - run: goreleaser check
+      - run: goreleaser release --snapshot --clean
+      - name: testes do dist/
+        env:
+          RELEASE_DIST: dist
+        # O grep reprova também o teste que pula (sem RELEASE_DIST) ou que o -run não acha.
+        run: |
+          go test -count=1 -timeout 2m -v -run '^TestSnapshot$' ./test/release/ | tee "$RUNNER_TEMP/snapshot.log"
+          grep -q '^--- PASS: TestSnapshot ' "$RUNNER_TEMP/snapshot.log"
+
+  publish:
+    needs: snapshot
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write # cria a release e sobe os pacotes e o checksums
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0 # o changelog vai até a tag anterior
+          persist-credentials: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version: stable
+          cache: false # o binário publicado não sai de cache restaurado
+      - name: instalar o goreleaser
+        run: |
+          curl -fsSLo "$RUNNER_TEMP/goreleaser.tgz" "https://github.com/goreleaser/goreleaser/releases/download/$GORELEASER_VERSION/goreleaser_Linux_x86_64.tar.gz"
+          echo "$GORELEASER_SHA256  $RUNNER_TEMP/goreleaser.tgz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/goreleaser.tgz" -C "$RUNNER_TEMP" goreleaser
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+      - name: publicar
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: goreleaser release --clean

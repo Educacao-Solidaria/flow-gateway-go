@@ -5,7 +5,8 @@
 // exatas (o trivy com SHA-256), as chamadas do gosec e do trivy, permissões, prazos, passos
 // condicionais e o checkout sem credencial. TestExceptions confere cada exceção do
 // repositório: no .trivyignore, o motivo num comentário logo acima e a data no `exp:`; no
-// código Go, cada anotação do gosec com a regra, o motivo e "revisar em AAAA-MM-DD". Os
-// testes rodam em todo `go test ./...`; o gosec e o trivy de verdade rodam no CI e no
-// `make audit`.
+// código Go, cada anotação do gosec com a regra, o motivo e "revisar em AAAA-MM-DD". Também
+// confere que o trivy não recebe exceção nem configuração por fora do portão (trivy.yaml,
+// trivy-secret.yaml ou o comentário trivy:ignore). Os testes rodam em todo `go test ./...`; o
+// gosec e o trivy de verdade rodam no CI e no `make audit`.
 package security

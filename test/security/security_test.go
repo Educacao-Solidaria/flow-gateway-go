@@ -30,6 +30,13 @@ const (
 	trivyGate  = `--severity HIGH,CRITICAL --ignore-unfixed --ignorefile .trivyignore --show-suppressed --exit-code 1`
 	trivyFS    = `trivy fs --scanners vuln,secret,misconfig ` + trivyGate + ` .`
 	trivyImage = `trivy image --scanners vuln,secret ` + trivyGate + ` "$GATEWAY_IMAGE"`
+	// A release oficial, conferida pelo SHA-256 antes de extrair: o script inteiro, porque um
+	// `|| true` depois do sha256sum passaria por um teste de trecho.
+	trivyInstall = `curl -fsSLo "$RUNNER_TEMP/trivy.tgz" "https://github.com/aquasecurity/trivy/releases/download/v$TRIVY_VERSION/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
+echo "$TRIVY_SHA256  $RUNNER_TEMP/trivy.tgz" | sha256sum -c -
+tar -xzf "$RUNNER_TEMP/trivy.tgz" -C "$RUNNER_TEMP" trivy
+echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+`
 )
 
 // read devolve o arquivo name da raiz com fim de linha LF (o checkout do Windows traz CRLF).
@@ -94,17 +101,16 @@ func TestWorkflow(t *testing.T) {
 			case strings.HasPrefix(s.Uses, "actions/checkout@"):
 				assert.Equal(t, false, s.With["persist-credentials"], "%s: checkout sem deixar o token no .git", name)
 			case strings.HasPrefix(s.Uses, "docker/build-push-action@"):
-				assert.Equal(t, false, s.With["push"], "a imagem não sai do runner")
+				// A imagem do docker.yml (mesmo contexto e build-args), lida do cache e sem sair do runner.
+				assert.Equal(t, map[string]any{"context": ".", "push": false, "load": true, "provenance": false,
+					"tags": "${{ env.GATEWAY_IMAGE }}", "build-args": "COMMIT=${{ github.sha }}", "cache-from": "type=gha"}, s.With)
 			case s.Run != "":
 				runs[name] = append(runs[name], s.Run)
 			}
 		}
 	}
 	assert.Equal(t, []string{`go install "github.com/securego/gosec/v2/cmd/gosec@$GOSEC_VERSION"`, gosecRun}, runs["gosec"])
-	require.Len(t, runs["trivy"], 3)
-	assert.Contains(t, runs["trivy"][0], "https://github.com/aquasecurity/trivy/releases/download/v$TRIVY_VERSION/")
-	assert.Contains(t, runs["trivy"][0], `echo "$TRIVY_SHA256  $RUNNER_TEMP/trivy.tgz" | sha256sum -c -`, "SHA-256 conferido")
-	assert.Equal(t, []string{trivyFS, trivyImage}, runs["trivy"][1:])
+	assert.Equal(t, []string{trivyInstall, trivyFS, trivyImage}, runs["trivy"])
 
 	m := regexp.MustCompile(`(?m)^audit:.*\n((?:\t.*\n)+)`).FindStringSubmatch(read(t, "Makefile"))
 	require.NotNil(t, m, "alvo audit no Makefile")
@@ -156,9 +162,12 @@ func nosecProblems(src string) ([]string, error) {
 	for _, g := range f.Comments {
 		var note []string
 		for _, c := range g.List {
-			line := strings.TrimSpace(strings.TrimLeft(c.Text, "/*")) // `//` e `/* */`, como o gosec
-			if len(note) > 0 || strings.HasPrefix(line, "#nosec") || strings.HasPrefix(line, "gosec:disable") {
-				note = append(note, line)
+			// Linha a linha, como o gosec: num /* */ a marca vale no começo de qualquer linha.
+			for _, line := range strings.Split(c.Text, "\n") {
+				line = strings.TrimSpace(strings.TrimLeft(strings.TrimSpace(line), "/*"))
+				if len(note) > 0 || strings.HasPrefix(line, "#nosec") || strings.HasPrefix(line, "gosec:disable") {
+					note = append(note, line)
+				}
 			}
 		}
 		if len(note) == 0 {
@@ -209,16 +218,34 @@ func TestExceptionRules(t *testing.T) {
 		"// #nosec G404 -- revisar em 2027-02-30",
 		"//gosec:disable G404 -- sem data",
 		"/* #nosec G404 -- sem data */",
+		"/* explicação antes\n   #nosec G404 -- sem data */", // o gosec aceita a marca na 2ª linha
 		"// explicação antes\n// #nosec G404 -- sem data",
 	} {
 		assert.Len(t, nosec(bad), 1, bad)
 	}
+
+	for _, s := range []string{"# trivy:ignore:AVD-DS-0002\nUSER root\n", "#trivy:ignore:DS002", `resource "x" "y" {} // trivy:ignore:z`} {
+		assert.Regexp(t, inlineIgnore, s)
+	}
+	assert.NotRegexp(t, inlineIgnore, "# a exceção do trivy vai no .trivyignore\n")
 }
 
+// inlineIgnore é a exceção que o trivy aceita num comentário do próprio arquivo de configuração
+// (no Dockerfile, por exemplo). Ela não tem motivo nem data: a exceção vai para o .trivyignore,
+// que aceita também os ids de misconfig (DS-0002, por exemplo).
+var inlineIgnore = regexp.MustCompile(`(#|//)[ \t]*trivy:ignore`)
+
 // TestExceptions confere cada exceção do repositório (contrato da Fase 5, §6): o .trivyignore e
-// toda anotação do gosec no código Go, com motivo e data de revisão.
+// toda anotação do gosec no código Go, com motivo e data de revisão, e nenhum outro caminho para
+// afrouxar o trivy.
 func TestExceptions(t *testing.T) {
 	assert.Empty(t, trivyignoreProblems(read(t, ".trivyignore")))
+	// O trivy lê sozinho o trivy.yaml e o trivy-secret.yaml da pasta em que roda (a raiz, no CI e
+	// no make audit): um skip-files ou uma regra de segredo desligada ali afrouxaria o portão sem
+	// mudar o comando.
+	for _, name := range []string{"trivy.yaml", "trivy-secret.yaml"} {
+		assert.NoFileExists(t, filepath.Join(root, name), "configuração do trivy fora do portão")
+	}
 	files := 0
 	require.NoError(t, filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		switch {
@@ -226,14 +253,18 @@ func TestExceptions(t *testing.T) {
 			return err
 		case d.IsDir() && (d.Name() == ".git" || d.Name() == "testdata"):
 			return filepath.SkipDir
-		case d.IsDir() || filepath.Ext(path) != ".go":
+		case !d.Type().IsRegular():
 			return nil
 		}
-		files++
 		src, err := os.ReadFile(path)
 		if err != nil {
 			return err
 		}
+		if filepath.Ext(path) != ".go" {
+			assert.Empty(t, inlineIgnore.FindAllString(string(src), -1), "%s: exceção do trivy fora do .trivyignore", path)
+			return nil
+		}
+		files++
 		problems, err := nosecProblems(string(src))
 		assert.NoError(t, err, path)
 		assert.Empty(t, problems, path)

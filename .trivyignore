@@ -15,3 +15,4 @@ CVE-2026-63209 exp:2027-01-22
 # mas o govulncheck não acha chamada a nenhum símbolo vulnerável; o secure/precis nem é
 # importado.
 CVE-2026-56852 exp:2027-01-22
+CVE-2026-56851 exp:2027-01-22
